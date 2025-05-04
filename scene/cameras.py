@@ -36,7 +36,13 @@ class Camera(nn.Module):
             self.data_device = torch.device("cuda")
 
         self.original_image = image.clamp(0.0, 1.0).to(self.data_device)
-        self.fid = torch.Tensor(np.array([fid])).to(self.data_device)
+        
+        if fid:
+            self.fid = torch.tensor(fid).to(self.data_device)
+        else:
+            self.fid = fid
+
+
         self.image_width = self.original_image.shape[2]
         self.image_height = self.original_image.shape[1]
         self.depth = torch.Tensor(depth).to(self.data_device) if depth is not None else None

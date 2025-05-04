@@ -19,7 +19,7 @@ WARNED = False
 
 
 def loadCam(args, id, cam_info, resolution_scale):
-    orig_w, orig_h = cam_info.image.size
+    orig_w, orig_h = cam_info.image.shape[:2]
 
     if args.resolution in [1, 2, 4, 8]:
         resolution = round(orig_w / (resolution_scale * args.resolution)), round(
@@ -41,7 +41,11 @@ def loadCam(args, id, cam_info, resolution_scale):
         scale = float(global_down) * float(resolution_scale)
         resolution = (int(orig_w / scale), int(orig_h / scale))
 
-    resized_image_rgb = PILtoTorch(cam_info.image, resolution)
+    # TODO - fix this
+    
+    # resized_image_rgb = PILtoTorch(cam_info.image, resolution)
+    import torch
+    resized_image_rgb = torch.from_numpy(cam_info.image).permute(2, 0, 1) / 255.0
 
     gt_image = resized_image_rgb[:3, ...]
     loaded_mask = None

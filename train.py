@@ -23,6 +23,9 @@ from utils.image_utils import psnr
 from argparse import ArgumentParser, Namespace
 from arguments import ModelParams, PipelineParams, OptimizationParams
 
+
+from scene.decoupled_model import DecoupledModel
+
 try:
     from torch.utils.tensorboard import SummaryWriter
 
@@ -32,13 +35,12 @@ except ImportError:
 
 
 def training(dataset, opt, pipe, testing_iterations, saving_iterations):
-    tb_writer = prepare_output_and_logger(dataset)
-    gaussians = GaussianModel(dataset.sh_degree)
-    deform = DeformModel(dataset.is_blender, dataset.is_6dof)
-    deform.train_setting(opt)
+    #tb_writer = prepare_output_and_logger(dataset)
 
-    scene = Scene(dataset, gaussians)
-    gaussians.training_setup(opt)
+    model = DecoupledModel(dataset.sh_degree, dataset.is_blender, dataset.is_6dof)
+    model.training_setup(opt)
+
+    scene = Scene(dataset, model)
 
     bg_color = [1, 1, 1] if dataset.white_background else [0, 0, 0]
     background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
@@ -46,7 +48,10 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
     iter_start = torch.cuda.Event(enable_timing=True)
     iter_end = torch.cuda.Event(enable_timing=True)
 
-    viewpoint_stack = None
+    viewpoint_stack_static = None
+    viewpoint_stack_dynamic = None
+
+
     ema_loss_for_log = 0.0
     best_psnr = 0.0
     best_iteration = 0
@@ -61,8 +66,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
                 custom_cam, do_training, pipe.do_shs_python, pipe.do_cov_python, keep_alive, scaling_modifer = network_gui.receive()
                 if custom_cam != None:
                     net_image = render(custom_cam, gaussians, pipe, background, scaling_modifer)["render"]
-                    net_image_bytes = memoryview((torch.clamp(net_image, min=0, max=1.0) * 255).byte().permute(1, 2,
-                                                                                                               0).contiguous().cpu().numpy())
+                    net_image_bytes = memoryview((torch.clamp(net_image, min=0, max=1.0) * 255).byte().permute(1, 2, 0).contiguous().cpu().numpy())
                 network_gui.send(net_image_bytes, dataset.source_path)
                 if do_training and ((iteration < int(opt.iterations)) or not keep_alive):
                     break
@@ -73,45 +77,97 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
 
         # Every 1000 its we increase the levels of SH up to a maximum degree
         if iteration % 1000 == 0:
-            gaussians.oneupSHdegree()
+            model.oneupSHdegree()
 
         # Pick a random Camera
-        if not viewpoint_stack:
-            viewpoint_stack = scene.getTrainCameras().copy()
+        if not viewpoint_stack_static:
+            viewpoint_stack_static = scene.getStaticCameras().copy()
 
-        total_frame = len(viewpoint_stack)
+        if not viewpoint_stack_dynamic:
+            viewpoint_stack_dynamic = scene.getDynamicCameras().copy()
+
+        total_frame = len(viewpoint_stack_static) # == len(viewpoint_stack_dynamic)
         time_interval = 1 / total_frame
 
-        viewpoint_cam = viewpoint_stack.pop(randint(0, len(viewpoint_stack) - 1))
+        random_idx = randint(0, total_frame - 1)
+        viewpoint_cam_static = viewpoint_stack_static.pop(random_idx)
+        viewpoint_cam_dynamic = viewpoint_stack_dynamic.pop(random_idx)
+
         if dataset.load2gpu_on_the_fly:
-            viewpoint_cam.load2device()
-        fid = viewpoint_cam.fid
+            viewpoint_cam_static.load2device()
+            viewpoint_cam_dynamic.load2device()
 
-        if iteration < opt.warm_up:
-            d_xyz, d_rotation, d_scaling = 0.0, 0.0, 0.0
+        fid = torch.tensor(viewpoint_cam_dynamic.fid, device="cuda")
+
+        # Deform model inference
+        if iteration < 0: # < opt.warm_up:
+            static_deltas = (0.0, 0.0, 0.0)
+            dynamic_deltas = (0.0, 0.0, 0.0)
+            composed_deltas = (0.0, 0.0, 0.0)
         else:
-            N = gaussians.get_xyz.shape[0]
-            time_input = fid.unsqueeze(0).expand(N, -1)
+            deltas = model.infer_deltas(fid, iteration, time_interval, smooth_term)
+            static_deltas, dynamic_deltas, composed_deltas = deltas
 
-            ast_noise = 0 if dataset.is_blender else torch.randn(1, 1, device='cuda').expand(N, -1) * time_interval * smooth_term(iteration)
-            d_xyz, d_rotation, d_scaling = deform.step(gaussians.get_xyz.detach(), time_input + ast_noise)
+        # Loss computation
+        loss = torch.tensor(0.0, device="cuda")
 
-        # Render
-        render_pkg_re = render(viewpoint_cam, gaussians, pipe, background, d_xyz, d_rotation, d_scaling, dataset.is_6dof)
-        image, viewspace_point_tensor, visibility_filter, radii = render_pkg_re["render"], render_pkg_re[
-            "viewspace_points"], render_pkg_re["visibility_filter"], render_pkg_re["radii"]
-        # depth = render_pkg_re["depth"]
+        gt_image_static = viewpoint_cam_static.original_image.cuda()
+        gt_image = viewpoint_cam_dynamic.original_image.cuda()
 
-        # Loss
-        gt_image = viewpoint_cam.original_image.cuda()
-        Ll1 = l1_loss(image, gt_image)
-        loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
+        # 1. Render static background
+        render_pkg_re_static = render(viewpoint_cam_static, model.static, pipe, background, 
+                                      static_deltas[0], static_deltas[1], static_deltas[2], 
+                                      dataset.is_6dof)
+
+        static_render = render_pkg_re_static["render"]
+        Ll1_static = l1_loss(static_render, gt_image_static)
+
+        ssim_static = ssim(static_render, gt_image)
+
+        loss += (1.0 - opt.lambda_dssim) * Ll1_static + opt.lambda_dssim * (1.0 - ssim_static)
+
+        # 2. Render dynamic object
+        render_pkg_re_dynamic = render(viewpoint_cam_dynamic, model.dynamic, pipe, background, 
+                                       dynamic_deltas[0], dynamic_deltas[1], dynamic_deltas[2], 
+                                       dataset.is_6dof)
+
+        dynamic_render = render_pkg_re_dynamic["render"]
+        Ll1_dynamic = l1_loss(dynamic_render, gt_image)
+        ssim_dynamic = ssim(dynamic_render, gt_image)
+
+        loss += (1.0 - opt.lambda_dssim) * Ll1_dynamic + opt.lambda_dssim * (1.0 - ssim_dynamic)
+
+        # 3. Render composed 
+        render_pkg_re_composed = render(viewpoint_cam_dynamic, model, pipe, background,
+                                        composed_deltas[0], composed_deltas[1], composed_deltas[2],
+                                        dataset.is_6dof)
+
+
+        composed_render = render_pkg_re_composed["render"]
+        Ll1_composed = l1_loss(composed_render, gt_image)
+        ssim_composed = ssim(composed_render, gt_image)
+
+        loss += (1.0 - opt.lambda_dssim) * Ll1_composed + opt.lambda_dssim * (1.0 - ssim_composed)
+
         loss.backward()
 
-        iter_end.record()
+        # DEBUG
+
+        from torchvision.utils import save_image
+        save_image(composed_render, "comp.png")
+        save_image(static_render, "stat.png")
+        save_image(dynamic_render, "dyna.png")
+        save_image(gt_image, "gtimage.png")
+
 
         if dataset.load2gpu_on_the_fly:
-            viewpoint_cam.load2device('cpu')
+            viewpoint_cam_static.load2device("cpu")
+            viewpoint_cam_dynamic.load2device("cpu")
+
+        # image, viewspace_point_tensor, visibility_filter, radii = render_pkg_re["render"], render_pkg_re["viewspace_points"], render_pkg_re["visibility_filter"], render_pkg_re["radii"]
+        # depth = render_pkg_re["depth"]
+
+        iter_end.record()
 
         with torch.no_grad():
             # Progress bar
@@ -123,44 +179,58 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
                 progress_bar.close()
 
             # Keep track of max radii in image-space for pruning
-            gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter],
-                                                                 radii[visibility_filter])
+            vis_filter_static = render_pkg_re_static["visibility_filter"]
+            radii_static = render_pkg_re_static["radii"]
+            model.static.max_radii2D[vis_filter_static] = torch.max(model.static.max_radii2D[vis_filter_static], radii_static[vis_filter_static])
 
+            vis_filter_dynamic = render_pkg_re_dynamic["visibility_filter"]
+            radii_dynamic = render_pkg_re_dynamic["radii"]
+            model.dynamic.max_radii2D[vis_filter_dynamic] = torch.max(model.dynamic.max_radii2D[vis_filter_dynamic], radii_dynamic[vis_filter_dynamic])
+
+            # TODO - implement saving logic
+            
             # Log and save
-            cur_psnr = training_report(tb_writer, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end),
-                                       testing_iterations, scene, render, (pipe, background), deform,
-                                       dataset.load2gpu_on_the_fly, dataset.is_6dof)
-            if iteration in testing_iterations:
-                if cur_psnr.item() > best_psnr:
-                    best_psnr = cur_psnr.item()
-                    best_iteration = iteration
+            # cur_psnr = training_report(tb_writer, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background), deform, dataset.load2gpu_on_the_fly, dataset.is_6dof)
+            # if iteration in testing_iterations:
+            #     if cur_psnr.item() > best_psnr:
+            #         best_psnr = cur_psnr.item()
+            #         best_iteration = iteration
 
-            if iteration in saving_iterations:
-                print("\n[ITER {}] Saving Gaussians".format(iteration))
-                scene.save(iteration)
-                deform.save_weights(args.model_path, iteration)
+            # if iteration in saving_iterations:
+            #     print("\n[ITER {}] Saving Gaussians".format(iteration))
+            #     scene.save(iteration)
+            #     deform.save_weights(args.model_path, iteration)
+            
+            # TODO - implement densification logic
 
             # Densification
-            if iteration < opt.densify_until_iter:
-                viewspace_point_tensor_densify = render_pkg_re["viewspace_points_densify"]
-                gaussians.add_densification_stats(viewspace_point_tensor_densify, visibility_filter)
+            # if iteration < opt.densify_until_iter:
+            #     viewspace_point_tensor_densify = render_pkg_re["viewspace_points_densify"]
+            #     gaussians.add_densification_stats(viewspace_point_tensor_densify, visibility_filter)
 
-                if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0:
-                    size_threshold = 20 if iteration > opt.opacity_reset_interval else None
-                    gaussians.densify_and_prune(opt.densify_grad_threshold, 0.005, scene.cameras_extent, size_threshold)
+            #     if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0:
+            #         size_threshold = 20 if iteration > opt.opacity_reset_interval else None
+            #         gaussians.densify_and_prune(opt.densify_grad_threshold, 0.005, scene.cameras_extent, size_threshold)
 
-                if iteration % opt.opacity_reset_interval == 0 or (
-                        dataset.white_background and iteration == opt.densify_from_iter):
-                    gaussians.reset_opacity()
+            #     if iteration % opt.opacity_reset_interval == 0 or (
+            #             dataset.white_background and iteration == opt.densify_from_iter):
+            #         gaussians.reset_opacity()
 
             # Optimizer step
             if iteration < opt.iterations:
-                gaussians.optimizer.step()
-                gaussians.update_learning_rate(iteration)
-                deform.optimizer.step()
-                gaussians.optimizer.zero_grad(set_to_none=True)
-                deform.optimizer.zero_grad()
-                deform.update_learning_rate(iteration)
+                model.static.optimizer.step()
+                model.dynamic.optimizer.step()
+                model.deform.optimizer.step()
+
+                model.static.optimizer.zero_grad(set_to_none=True)
+                model.dynamic.optimizer.zero_grad(set_to_none=True)
+                model.deform.optimizer.zero_grad()
+
+                model.static.update_learning_rate(iteration)
+                model.dynamic.update_learning_rate(iteration)
+                model.deform.update_learning_rate(iteration)
+
+                
 
     print("Best PSNR = {} in Iteration {}".format(best_psnr, best_iteration))
 
@@ -257,9 +327,14 @@ if __name__ == "__main__":
     parser.add_argument('--ip', type=str, default="127.0.0.1")
     parser.add_argument('--port', type=int, default=6009)
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
-    parser.add_argument("--test_iterations", nargs="+", type=int,
-                        default=[5000, 6000, 7_000] + list(range(10000, 40001, 1000)))
-    parser.add_argument("--save_iterations", nargs="+", type=int, default=[7_000, 10_000, 20_000, 30_000, 40000])
+
+    test_every = 2500
+    test_it_def = list(range(test_every, 30_000, test_every))
+    parser.add_argument("--test_iterations", nargs="+", type=int, default=test_it_def)
+
+    save_it_def = [1, 1_000, 7_000, 15_000, 30_000]
+    parser.add_argument("--save_iterations", nargs="+", type=int, default=save_it_def)
+
     parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args(sys.argv[1:])
     args.save_iterations.append(args.iterations)
