@@ -66,14 +66,14 @@ class SceneInfo(NamedTuple):
     dynamic_cameras: list
 
 
-def read_scene(root: Path, subdir: str, preview_path: Optional[Path]=False):
+def read_scene(root: Path, subdir: str, conf_thrs: float, is_dynamic: bool, preview_path: Optional[Path]=False):
     subdir = Path(subdir)
-    spec = SceneSpec(root=root, subdir=subdir)
+    spec = SceneSpec(root=root, subdir=subdir, dynamic=is_dynamic)
     frames = load_scene_data(spec)
-    scene = Scene(frames)
+    scene = Scene(frames, dynamic=is_dynamic)
 
     scene.align_poses()
-    scene.create_pointcloud(downsample=2)
+    scene.create_pointcloud(downsample=4)
     scene.normalize()
 
     if preview_path:
@@ -142,14 +142,14 @@ def read_cam_info_from_scene(scene: Scene, idx: int, is_dynamic: bool=False):
 def readMonST3RSceneInfo(path):
     root = Path(path)
 
-    static_scene = read_scene(root, "static")
-    dynamic_scene = read_scene(root, "dynamic")
+    static_scene = read_scene(root, "static", conf_thrs=0.0, is_dynamic=False)
+    dynamic_scene = read_scene(root, "dynamic", conf_thrs=0.6, is_dynamic=True) # uses masking
 
     mismatch_msg = "Static and dynamic sequence length mismatch"
     assert static_scene.num_frames == dynamic_scene.num_frames, mismatch_msg
     num_frames = static_scene.num_frames
 
-    _get_cam_infos = lambda scene, dyna: [read_cam_info_from_scene(scene, idx, dyna) for idx in range(num_frames)]
+    _get_cam_infos = lambda scene, dynamic: [read_cam_info_from_scene(scene, idx, dynamic) for idx in range(num_frames)]
     static_cam_infos = _get_cam_infos(static_scene, False)
     dynamic_cam_infos = _get_cam_infos(dynamic_scene, True)
 

@@ -26,16 +26,16 @@ from arguments import ModelParams, PipelineParams, OptimizationParams
 
 from scene.decoupled_model import DecoupledModel
 
+
 try:
     from torch.utils.tensorboard import SummaryWriter
-
     TENSORBOARD_FOUND = True
 except ImportError:
     TENSORBOARD_FOUND = False
 
 
 def training(dataset, opt, pipe, testing_iterations, saving_iterations):
-    #tb_writer = prepare_output_and_logger(dataset)
+    tb_writer = prepare_output_and_logger(dataset)
 
     model = DecoupledModel(dataset.sh_degree, dataset.is_blender, dataset.is_6dof)
     model.training_setup(opt)
@@ -124,7 +124,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
 
         ssim_static = ssim(static_render, gt_image)
 
-        loss += (1.0 - opt.lambda_dssim) * Ll1_static + opt.lambda_dssim * (1.0 - ssim_static)
+        loss_static = (1.0 - opt.lambda_dssim) * Ll1_static + opt.lambda_dssim * (1.0 - ssim_static)
+        loss += loss_static
 
         # 2. Render dynamic object
         render_pkg_re_dynamic = render(viewpoint_cam_dynamic, model.dynamic, pipe, background, 
@@ -135,7 +136,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
         Ll1_dynamic = l1_loss(dynamic_render, gt_image)
         ssim_dynamic = ssim(dynamic_render, gt_image)
 
-        loss += (1.0 - opt.lambda_dssim) * Ll1_dynamic + opt.lambda_dssim * (1.0 - ssim_dynamic)
+        loss_dynamic = (1.0 - opt.lambda_dssim) * Ll1_dynamic + opt.lambda_dssim * (1.0 - ssim_dynamic)
+        loss += loss_dynamic
 
         # 3. Render composed 
         render_pkg_re_composed = render(viewpoint_cam_dynamic, model, pipe, background,
@@ -147,17 +149,18 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
         Ll1_composed = l1_loss(composed_render, gt_image)
         ssim_composed = ssim(composed_render, gt_image)
 
-        loss += (1.0 - opt.lambda_dssim) * Ll1_composed + opt.lambda_dssim * (1.0 - ssim_composed)
+        loss_composed = (1.0 - opt.lambda_dssim) * Ll1_composed + opt.lambda_dssim * (1.0 - ssim_composed)
+        loss += loss_composed
 
         loss.backward()
 
         # DEBUG
 
-        from torchvision.utils import save_image
-        save_image(composed_render, "comp.png")
-        save_image(static_render, "stat.png")
-        save_image(dynamic_render, "dyna.png")
-        save_image(gt_image, "gtimage.png")
+        # from torchvision.utils import save_image
+        # save_image(composed_render, "comp.png")
+        # save_image(static_render, "stat.png")
+        # save_image(dynamic_render, "dyna.png")
+        # save_image(gt_image, "gtimage.png")
 
 
         if dataset.load2gpu_on_the_fly:
@@ -190,23 +193,34 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
             # TODO - implement saving logic
             
             # Log and save
-            # cur_psnr = training_report(tb_writer, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background), deform, dataset.load2gpu_on_the_fly, dataset.is_6dof)
-            # if iteration in testing_iterations:
-            #     if cur_psnr.item() > best_psnr:
-            #         best_psnr = cur_psnr.item()
-            #         best_iteration = iteration
+            cur_psnr = training_report(tb_writer, 
+                                       iteration, 
+                                       loss_static, 
+                                       loss_dynamic,
+                                       loss_composed, 
+                                       iter_start.elapsed_time(iter_end), 
+                                       testing_iterations, scene, 
+                                       render, 
+                                       (pipe, background), 
+                                       dataset.load2gpu_on_the_fly, 
+                                       dataset.is_6dof)
 
-            # if iteration in saving_iterations:
-            #     print("\n[ITER {}] Saving Gaussians".format(iteration))
-            #     scene.save(iteration)
-            #     deform.save_weights(args.model_path, iteration)
+            if iteration in testing_iterations:
+                if cur_psnr.item() > best_psnr:
+                    best_psnr = cur_psnr.item()
+                    best_iteration = iteration
+
+            if iteration in saving_iterations:
+                print("\n[ITER {}] Saving Gaussians".format(iteration))
+                scene.save(iteration)
+                scene.model.deform.save_weights(args.model_path, iteration)
             
             # TODO - implement densification logic
 
             # Densification
             # if iteration < opt.densify_until_iter:
-            #     viewspace_point_tensor_densify = render_pkg_re["viewspace_points_densify"]
-            #     gaussians.add_densification_stats(viewspace_point_tensor_densify, visibility_filter)
+            #     rprs = render_pkg_re_static
+            #     viewspace_point_tensor_densify = gaussians.add_densification_stats(rprs["viewspace_points_densify"], rprs["visibility_filter"])
 
             #     if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0:
             #         size_threshold = 20 if iteration > opt.opacity_reset_interval else None
@@ -258,42 +272,66 @@ def prepare_output_and_logger(args):
     return tb_writer
 
 
-def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_iterations, scene: Scene, renderFunc,
-                    renderArgs, deform, load2gpu_on_the_fly, is_6dof=False):
-    if tb_writer:
-        tb_writer.add_scalar('train_loss_patches/l1_loss', Ll1.item(), iteration)
-        tb_writer.add_scalar('train_loss_patches/total_loss', loss.item(), iteration)
-        tb_writer.add_scalar('iter_time', elapsed, iteration)
+def training_report(
+        tb_writer, 
+        iteration, 
+        loss_static,
+        loss_dynamic, 
+        loss_composed, 
+        elapsed, 
+        testing_iterations, 
+        scene: Scene, 
+        renderFunc,
+        renderArgs, 
+        load2gpu_on_the_fly, 
+        is_6dof=False
+    ):
 
-    test_psnr = 0.0
-    # Report test and samples of training set
+    if tb_writer:
+        tb_writer.add_scalar("train_loss_patches/loss_static", loss_static.item(), iteration)
+        tb_writer.add_scalar("train_loss_patches/loss_dynamic", loss_dynamic.item(), iteration)
+        tb_writer.add_scalar("train_loss_patches/loss_composed", loss_composed.item(), iteration)
+        tb_writer.add_scalar("iter_time", elapsed, iteration)
+
+    psnr_value = 0.0
+
     if iteration in testing_iterations:
         torch.cuda.empty_cache()
-        validation_configs = ({'name': 'test', 'cameras': scene.getTestCameras()},
-                              {'name': 'train',
-                               'cameras': [scene.getTrainCameras()[idx % len(scene.getTrainCameras())] for idx in
-                                           range(5, 30, 5)]})
+        
+        # TODO - PSNR for static and dynamic
+        validation_config = (
+            # {"name": "static", "cameras": scene.getStaticCameras()}, 
+            # {"name": "dynamic", "cameras": scene.getDynamicCameras()},
+            {"name": "composed", "cameras": scene.getDynamicCameras()}
+        )
 
         for config in validation_configs:
-            if config['cameras'] and len(config['cameras']) > 0:
+            print(config)
+            if config["cameras"] and len(config["cameras"]) > 0:
                 images = torch.tensor([], device="cuda")
                 gts = torch.tensor([], device="cuda")
-                for idx, viewpoint in enumerate(config['cameras']):
+                for idx, viewpoint in enumerate(config["cameras"]):
                     if load2gpu_on_the_fly:
                         viewpoint.load2device()
+
                     fid = viewpoint.fid
-                    xyz = scene.gaussians.get_xyz
-                    time_input = fid.unsqueeze(0).expand(xyz.shape[0], -1)
-                    d_xyz, d_rotation, d_scaling = deform.step(xyz.detach(), time_input)
-                    image = torch.clamp(
-                        renderFunc(viewpoint, scene.gaussians, *renderArgs, d_xyz, d_rotation, d_scaling, is_6dof)["render"],
-                        0.0, 1.0)
+                    deltas = model.infer_deltas(fid, noise=False)
+                    _, _, composed_deltas = deltas
+
+                    image = torch.clamp(renderFunc(viewpoint, 
+                                                   scene.model, 
+                                                   *renderArgs, 
+                                                   composed_deltas[0],
+                                                   composed_deltas[1],
+                                                   composed_deltas[2],
+                                                   is_6dof)["render"],  0.0, 1.0)
+                        
                     gt_image = torch.clamp(viewpoint.original_image.to("cuda"), 0.0, 1.0)
                     images = torch.cat((images, image.unsqueeze(0)), dim=0)
                     gts = torch.cat((gts, gt_image.unsqueeze(0)), dim=0)
 
                     if load2gpu_on_the_fly:
-                        viewpoint.load2device('cpu')
+                        viewpoint.load2device("cpu")
                     if tb_writer and (idx < 5):
                         tb_writer.add_images(config['name'] + "_view_{}/render".format(viewpoint.image_name),
                                              image[None], global_step=iteration)
@@ -301,21 +339,19 @@ def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_i
                             tb_writer.add_images(config['name'] + "_view_{}/ground_truth".format(viewpoint.image_name),
                                                  gt_image[None], global_step=iteration)
 
-                l1_test = l1_loss(images, gts)
-                psnr_test = psnr(images, gts).mean()
-                if config['name'] == 'test' or len(validation_configs[0]['cameras']) == 0:
-                    test_psnr = psnr_test
-                print("\n[ITER {}] Evaluating {}: L1 {} PSNR {}".format(iteration, config['name'], l1_test, psnr_test))
-                if tb_writer:
-                    tb_writer.add_scalar(config['name'] + '/loss_viewpoint - l1_loss', l1_test, iteration)
-                    tb_writer.add_scalar(config['name'] + '/loss_viewpoint - psnr', psnr_test, iteration)
+                psnr_value = psnr(images, gts).mean()
+                print(f"\n[ITER {iteration}] PSNR: {psnr_value}")
+                
+                # if tb_writer:
+                #     tb_writer.add_scalar(config['name'] + '/loss_viewpoint - l1_loss', l1_test, iteration)
+                #     tb_writer.add_scalar(config['name'] + '/loss_viewpoint - psnr', psnr_test, iteration)
 
-        if tb_writer:
-            tb_writer.add_histogram("scene/opacity_histogram", scene.gaussians.get_opacity, iteration)
-            tb_writer.add_scalar('total_points', scene.gaussians.get_xyz.shape[0], iteration)
+        # if tb_writer:
+        #     tb_writer.add_histogram("scene/opacity_histogram", scene.gaussians.get_opacity, iteration)
+        #     tb_writer.add_scalar('total_points', scene.gaussians.get_xyz.shape[0], iteration)
         torch.cuda.empty_cache()
 
-    return test_psnr
+    return psnr_value
 
 
 if __name__ == "__main__":

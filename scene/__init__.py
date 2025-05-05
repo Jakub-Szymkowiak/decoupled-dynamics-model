@@ -64,11 +64,11 @@ class Scene:
         saving_dir = os.path.join(self.model_path, f"point_cloud/_{iteration}")
         
         # TODO - implement saving logic
-        static_ply_path = None
-        dynamic_ply_path = None
+        static_ply_path = os.path.join(saving_dir, "static.ply")
+        dynamic_ply_path = os.path.join(saving_dir, "dynamic.ply")
 
-        self.static.save_ply(static_ply_path)
-        self.dynamic.save_ply(dynamic_ply_path)
+        self.model.static.save_ply(static_ply_path)
+        self.model.dynamic.save_ply(dynamic_ply_path)
 
     def getStaticCameras(self, scale=1.0):
         return self.static_cams[scale]

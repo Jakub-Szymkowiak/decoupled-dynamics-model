@@ -14,13 +14,15 @@ class Frame:
             confs: np.ndarray,
             paths: dict,
             intrinsics: Intrinsics,
-            pose: Pose
+            pose: Pose,
+            dmask: Optional[np.ndarray] = None,
         ):
 
         self.frame_id = frame_id
         self.image = image
         self.depth = depth
         self.confs = confs
+        self.dmask = dmask
         self.paths = paths
         self.intrinsics = intrinsics
         self.pose = pose
@@ -30,10 +32,17 @@ class Frame:
         assert self.image.shape[:2] == (self.H, self.W), "Image shape mismatch"
         assert self.depth.shape[:2] == (self.H, self.W), "Depth shape mismatch"
         assert self.confs.shape[:2] == (self.H, self.W), "Confs shape mismatch"
+        
+        if self.dmask is not None:
+            assert self.dmask.shape[:2] == (self.H, self.W), "Dynamic motion mask shape mismatch"
 
-    def to_points(self, stride: int=1, conf_thrs: float=0.0):
+    def to_points(self, stride: int=1, conf_thrs: float=0.0, use_masks: bool=False):
         _downsample = lambda arr: arr[::stride, ::stride]
         image, depth, confs = _downsample(self.image), _downsample(self.depth), _downsample(self.confs)
+
+        if use_masks:
+            assert self.dmask is not None, "Cannot use dynamic motion masks; masks haven't been loaded"
+            dmask = _downsample(self.dmask)
 
         H, W = image.shape[:2]
 
@@ -48,7 +57,11 @@ class Frame:
         points_world = self.pose.transform_points(points_cam)
         
         conf_flat = confs.flatten()
-        mask = conf_flat > conf_thrs
+        mask = (conf_flat > conf_thrs) 
+
+        if use_masks:
+            inv_dmask_flat = ~dmask.flatten().astype(bool)
+            mask = mask & inv_dmask_flat
 
         points = points_world[mask]
         colors = image.reshape(-1, 3)[mask] / 255.0
@@ -58,9 +71,10 @@ class Frame:
 
 
 class Scene:
-    def __init__(self, frames: List[Frame], conf_thrs: float = 0.6):
+    def __init__(self, frames: List[Frame], dynamic: bool=False, conf_thrs: float=0.6):
         assert all(isinstance(f, Frame) for f in frames), "All elements must be Frame instances"
         self._frames = frames
+        self.dynamic = dynamic
         self.conf_thrs = conf_thrs
         self._pointcloud = None
 
@@ -85,7 +99,7 @@ class Scene:
         pts, colors = [], []
 
         for frame in self._frames:
-            p, c, _ = frame.to_points(stride=downsample, conf_thrs=self.conf_thrs)
+            p, c, _ = frame.to_points(stride=downsample, conf_thrs=self.conf_thrs, use_masks=self.dynamic)
             pts.append(p)
             colors.append(c)
 

@@ -1,5 +1,6 @@
-import torch
+from typing import Optional
 
+import torch
 
 from scene.deform_model import DeformModel
 from scene.gaussian_model import BasicPointCloud, GaussianModel
@@ -28,20 +29,30 @@ class DecoupledModel:
     def infer_deltas(
             self, 
             fid: torch.Tensor, 
-            iteration: int, 
-            time_interval: float, 
-            smooth_term
+            iteration: Optional[int], 
+            time_interval: Optional[float], 
+            smooth_term: Optional[torch.tensor],
+            noise: bool=True
         ):
+
+        _get_N = lambda g: g.get_xyz.shape[0]
+        Ns = _get_N(self.static)
+        Nd = _get_N(self.dynamic)
+        
+
+        if noise == True:
+            assert iteration, "Pass iteration"
+            assert time_interval, "Pass time_interval"
+            assert smooth_term, "Pass smooth_term"
+
+            ast_noise = torch.randn(Nd, 1, device="cuda")
+            ast_noise *= time_interval * smooth_term(iteration)
+        else:
+            ast_noise = 0.0
 
         static_deltas = (0.0, 0.0, 0.0)
 
-        Nd = self.dynamic.get_xyz.shape[0]
-        Ns = self.static.get_xyz.shape[0]
-
         time_input = fid.unsqueeze(0).repeat(Nd, 1)
-
-        ast_noise = torch.randn(Nd, 1, device="cuda")
-        ast_noise *= time_interval * smooth_term(iteration)
 
         xyz = self.dynamic.get_xyz.detach()
         d_xyz, d_scaling, d_rotation = self.deform.step(xyz, time_input + ast_noise)
@@ -86,7 +97,9 @@ class DecoupledModel:
         ):
 
         self.static.create_from_pcd(static_ptc, cameras_extent)
+        print("Number of static background Gaussians at init: ", self.static.get_xyz.shape[0])
         self.dynamic.create_from_pcd(dynamic_ptc, cameras_extent)
+        print("Number of dynamic foreground Gaussians at init: ", self.dynamic.get_xyz.shape[0])
 
     def training_setup(self, training_args):
         self.deform.train_setting(training_args)

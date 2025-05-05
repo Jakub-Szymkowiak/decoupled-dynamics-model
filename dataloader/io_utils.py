@@ -23,20 +23,28 @@ def load_scene_data(spec: SceneSpec) -> List[Frame]:
         depth = np.load(depth_path)
         confs = np.load(conf_path)
 
-
         paths = {
             "image": image_path,
             "depth": depth_path,
-            "confs": conf_path
+            "confs": conf_path,
         }
 
+        if spec.dynamic:
+            dmask_path = spec.dmask_path(idx)
+            dmask = np.asarray(iio.imread(dmask_path))
+            paths["dmask"] = dmask_path
+        else:
+            dmask = None
+        
+
         frame = Frame(frame_id=idx,
-                     image=image,
-                     depth=depth,
-                     confs=confs,
-                     paths=paths,
-                     intrinsics=Intrinsics(K),
-                     pose=Pose(pose_vec))
+                      image=image,
+                      depth=depth,
+                      confs=confs,
+                      paths=paths,
+                      intrinsics=Intrinsics(K),
+                      pose=Pose(pose_vec),
+                      dmask=dmask)
                      
         frames.append(frame)
 
