@@ -21,6 +21,10 @@ class DecoupledModel:
         self.active_sh_degree = 0
         self.max_sh_degree = sh_degree
 
+        self._delta_buffers = None
+        self._time_input = None
+        self._ast_noise = None
+
     def _concat_attr(self, attr_name: str):
         static_attr = getattr(self.static, attr_name)
         dynamic_attr = getattr(self.dynamic, attr_name)
@@ -35,38 +39,47 @@ class DecoupledModel:
             noise: bool=True
         ):
 
-        _get_N = lambda g: g.get_xyz.shape[0]
-        Ns = _get_N(self.static)
-        Nd = _get_N(self.dynamic)
-        
+        # TODO - decide whether to use buffering
 
-        if noise == True:
-            assert iteration, "Pass iteration"
-            assert time_interval, "Pass time_interval"
-            assert smooth_term, "Pass smooth_term"
+        Ns = self.static.get_xyz.shape[0]
+        Nd = self.dynamic.get_xyz.shape[0]
 
-            ast_noise = torch.randn(Nd, 1, device="cuda")
-            ast_noise *= time_interval * smooth_term(iteration)
+        if noise:
+            assert iteration is not None and time_interval is not None and smooth_term is not None
+            self._ast_noise.normal_()
+            self._ast_noise *= time_interval * smooth_term(iteration)
         else:
-            ast_noise = 0.0
+            self._ast_noise.zero_()
 
-        static_deltas = (0.0, 0.0, 0.0)
-
-        time_input = fid.unsqueeze(0).repeat(Nd, 1)
+        self._time_input.copy_(fid.view(1, 1).expand(Nd, 1))
+        self._time_input += self._ast_noise
 
         xyz = self.dynamic.get_xyz.detach()
-        d_xyz, d_scaling, d_rotation = self.deform.step(xyz, time_input + ast_noise)
+        d_xyz, d_rotation, d_scaling  = self.deform.step(xyz, self._time_input)
 
-        static_zeros = lambda t: torch.zeros(Ns, t.shape[1], device=t.device, dtype=t.dtype)
+        buffers = {
+            "d_xyz": d_xyz,
+            "d_scaling": d_scaling,
+            "d_rotation": d_rotation
+        }
 
+        for name in ["d_xyz", "d_scaling", "d_rotation"]:
+            buf = self._delta_buffers[name]
+            data = buffers[name]
+            assert buf[Ns:].shape == data.shape, f"{name} shape mismatch: buf={buf[Ns:].shape}, data={data.shape}"
+
+            buf[:Ns].zero_()
+            buf[Ns:] = data.detach()
+
+        static_deltas = (0.0, 0.0, 0.0)
+        dynamic_deltas = (d_xyz, d_rotation, d_scaling)
         composed_deltas = (
-            torch.cat([static_zeros(d_xyz), d_xyz], dim=0),
-            torch.cat([static_zeros(d_scaling), d_scaling], dim=0),
-            torch.cat([static_zeros(d_rotation), d_rotation], dim=0),
+            self._delta_buffers["d_xyz"].clone(),
+            self._delta_buffers["d_rotation"].clone(),
+            self._delta_buffers["d_scaling"].clone()
         )
 
-        return static_deltas, (d_xyz, d_scaling, d_rotation), composed_deltas
-
+        return static_deltas, dynamic_deltas, composed_deltas
 
 
     @property
@@ -97,9 +110,21 @@ class DecoupledModel:
         ):
 
         self.static.create_from_pcd(static_ptc, cameras_extent)
-        print("Number of static background Gaussians at init: ", self.static.get_xyz.shape[0])
         self.dynamic.create_from_pcd(dynamic_ptc, cameras_extent)
-        print("Number of dynamic foreground Gaussians at init: ", self.dynamic.get_xyz.shape[0])
+
+        Ns, Nd = self.static.get_xyz.size(0), self.dynamic.get_xyz.size(0)
+
+        print("Number of static background Gaussians at init: ", Ns)
+        print("Number of dynamic foreground Gaussians at init: ", Nd)
+
+        self._delta_buffers = {
+            "d_xyz": torch.zeros(Ns + Nd, 3, device="cuda"),
+            "d_scaling": torch.zeros(Ns + Nd, 3, device="cuda"),
+            "d_rotation": torch.zeros(Ns + Nd, 4, device="cuda")
+        }
+
+        self._time_input = torch.zeros(Nd, 1, device="cuda")
+        self._ast_noise = torch.zeros(Nd, 1, device="cuda")
 
     def training_setup(self, training_args):
         self.deform.train_setting(training_args)

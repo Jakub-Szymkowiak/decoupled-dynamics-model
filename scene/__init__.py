@@ -28,7 +28,7 @@ class Scene:
         scene_info = sceneLoadTypeCallbacks["ours"](args.source_path)
 
         # TODO
-        self.cameras_extent = 1.0 
+        self.cameras_extent = 5.0 
 
         # TODO - implement loading logic for rendering
         if load_iteration:
