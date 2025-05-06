@@ -106,7 +106,6 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
             composed_deltas = (0.0, 0.0, 0.0)
         else:
             deltas = model.infer_deltas(fid, iteration, time_interval, smooth_term)
-            static_deltas, dynamic_deltas, composed_deltas = deltas
 
         # Loss computation
         loss = torch.tensor(0.0, device="cuda")
@@ -114,43 +113,43 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
         gt_image_static = viewpoint_cam_static.original_image.cuda()
         gt_image = viewpoint_cam_dynamic.original_image.cuda()
 
+        def _run_renderer(mode: str, viewpoint):
+            return render(viewpoint, 
+                          model.get_models()[mode], pipe, background, 
+                          deltas[mode].d_xyz, 
+                          deltas[mode].d_rotation, 
+                          deltas[mode].d_scaling, 
+                          dataset.is_6dof)
+
         # 1. Render static background
-        render_pkg_re_static = render(viewpoint_cam_static, model.static, pipe, background, 
-                                      static_deltas[0], static_deltas[1], static_deltas[2], 
-                                      dataset.is_6dof)
-
+        render_pkg_re_static = _run_renderer("static", viewpoint_cam_static)
         static_render = render_pkg_re_static["render"]
-        Ll1_static = l1_loss(static_render, gt_image_static)
 
+        Ll1_static = l1_loss(static_render, gt_image_static)
         ssim_static = ssim(static_render, gt_image)
 
         loss_static = (1.0 - opt.lambda_dssim) * Ll1_static + opt.lambda_dssim * (1.0 - ssim_static)
-        loss += loss_static
+        loss += loss_static * opt.lambda_static
 
         # 2. Render dynamic object
-        render_pkg_re_dynamic = render(viewpoint_cam_dynamic, model.dynamic, pipe, background, 
-                                       dynamic_deltas[0], dynamic_deltas[1], dynamic_deltas[2], 
-                                       dataset.is_6dof)
-
+        render_pkg_re_dynamic =_run_renderer("dynamic", viewpoint_cam_dynamic)
         dynamic_render = render_pkg_re_dynamic["render"]
+
         Ll1_dynamic = l1_loss(dynamic_render, gt_image)
         ssim_dynamic = ssim(dynamic_render, gt_image)
 
         loss_dynamic = (1.0 - opt.lambda_dssim) * Ll1_dynamic + opt.lambda_dssim * (1.0 - ssim_dynamic)
-        loss += loss_dynamic
+        loss += loss_dynamic * opt.lambda_dynamic
 
         # 3. Render composed 
-        render_pkg_re_composed = render(viewpoint_cam_dynamic, model, pipe, background,
-                                        composed_deltas[0], composed_deltas[1], composed_deltas[2],
-                                        dataset.is_6dof)
-
-
+        render_pkg_re_composed = _run_renderer("composed", viewpoint_cam_dynamic)
         composed_render = render_pkg_re_composed["render"]
+
         Ll1_composed = l1_loss(composed_render, gt_image)
         ssim_composed = ssim(composed_render, gt_image)
 
         loss_composed = (1.0 - opt.lambda_dssim) * Ll1_composed + opt.lambda_dssim * (1.0 - ssim_composed)
-        loss += loss_composed
+        loss += loss_composed * opt.lambda_composed
 
         loss.backward()
 
@@ -194,6 +193,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
             
             # Log and save
             cur_psnr = training_report(tb_writer, 
+                                       model,
                                        iteration, 
                                        loss_static, 
                                        loss_dynamic,
@@ -274,6 +274,7 @@ def prepare_output_and_logger(args):
 
 def training_report(
         tb_writer, 
+        model,
         iteration, 
         loss_static,
         loss_dynamic, 
@@ -298,12 +299,63 @@ def training_report(
     if iteration in testing_iterations:
         torch.cuda.empty_cache()
         
-        # TODO - PSNR for static and dynamic
-        validation_config = (
-            # {"name": "static", "cameras": scene.getStaticCameras()}, 
-            # {"name": "dynamic", "cameras": scene.getDynamicCameras()},
-            {"name": "composed", "cameras": scene.getDynamicCameras()}
-        )
+        static_cameras = scene.getStaticCameras()
+        dynamic_cameras = scene.getDynamicCameras()
+
+        images = torch.tensor([], device="cuda")
+        gts_static = torch.tensor([], device="cuda")
+        gts = torch.tensor([], device="cuda")
+
+        cam_enumerator = enumerate(zip(static_cameras, dynamic_cameras)) 
+        for idx, (static_viewpoint, dynamic_viewpoint) in cam_enumerator:
+            if load2gpu_on_the_fly:
+                static_viewpoint.load2device()
+                dynamic_viewpoint.load2device()
+
+            fid = dynamic_viewpoint.fid
+            deltas = model.infer_deltas(fid, noise=False)
+
+            def _get_image(mode: str, viewpoint):
+                render = renderFunc(viewpoint, 
+                                    scene.model.get_models()[mode], 
+                                    *renderArgs, 
+                                    deltas[mode].d_xyz, 
+                                    deltas[mode].d_rotation, 
+                                    deltas[mode].d_scaling,
+                                    is_6dof)["render"]
+                                    
+                return torch.clamp(render,  0.0, 1.0)
+
+            image_static = _get_image("static", static_viewpoint)
+            image_dynamic = _get_image("dynamic", dynamic_viewpoint)
+            image_compsoed = _get_image("composed", dynamic_viewpoint)
+            
+            gt_static = torch.clamp(static_viewpoint.original_image.to("cuda"), 0.0, 1.0)
+            gt_image = torch.clamp(dynamic_viewpoint.original_image.to("cuda"), 0.0, 1.0)
+            
+            gts_static = torch.cat((gts_static, gt_static.unsqueeze(0)), dim=0)
+            gts = torch.cat((gts, gt_image.unsqueeze(0)), dim=0)
+
+            if load2gpu_on_the_fly:
+                viewpoint_static.load2device("cpu")
+                viewpoint_dynamic.load2device("cpu")
+
+            if tb_writer and (idx < 5):
+                tb_writer.add_images("static" + f"_view_{viewpoint_static.image_name}/render", 
+                                     image_static[None], global_step=iteration)
+                tb_writer.add_images("dynamic" + f"_view_{viewpoint_dynamic.image_name}/render", 
+                                     image_static[None], global_step=iteration)
+
+                if iteration == testing_iterations[0]:
+                    tb_writer.add_images("static" + f"_view_{viewpoint_static.image_name}/ground_truth",
+                                         gt_static[None], global_step=iteration)
+                    tb_writer.add_images("dynamic" + f"_view_{viewpoint.dynamic.image_name}/ground_truth",
+                                         gt_static[None], global_step=iteration)
+
+        psnr_value_static = psnr(images_static, gts).mean()
+        psnr_value_dynamic = torch.tensor(0.0) # not implemented yet
+        psnr_value_composed = psnr(images, gts).mean()
+        
 
         for config in validation_configs:
             print(config)

@@ -62,8 +62,7 @@ class Scene:
 
     def save(self, iteration):
         saving_dir = os.path.join(self.model_path, f"point_cloud/_{iteration}")
-        
-        # TODO - implement saving logic
+
         static_ply_path = os.path.join(saving_dir, "static.ply")
         dynamic_ply_path = os.path.join(saving_dir, "dynamic.ply")
 

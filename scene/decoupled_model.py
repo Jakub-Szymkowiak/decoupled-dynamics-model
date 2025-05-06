@@ -1,4 +1,5 @@
-from typing import Optional
+from dataclasses import asdict, dataclass
+from typing import Literal, Optional, Union
 
 import torch
 
@@ -6,7 +7,48 @@ from scene.deform_model import DeformModel
 from scene.gaussian_model import BasicPointCloud, GaussianModel
 
 
+tensor_or_float = Union[torch.Tensor, float]
+
+@dataclass
+class Deltas:
+    # deltas can be either tensors
+    # or floats (static_deltas are 0.0 floats)
+    d_xyz: tensor_or_float
+    d_rotation: tensor_or_float
+    d_scaling: tensor_or_float
+
+    @classmethod
+    def from_tuple(cls, deltas_tuple: tuple):
+        assert len(deltas_tuple) == 3, "Expected a 3-tuple"
+        return cls(*deltas_tuple)
+
+    @classmethod
+    def zeros(cls, Ns: int, device="cuda"):
+        return cls(
+            d_xyz=torch.zeros(Ns, 3, device=device),
+            d_rotation=torch.zeros(Ns, 4, device=device),
+            d_scaling=torch.zeros(Ns, 3, device=device)
+        )
+
+    @classmethod
+    def cat(cls, a: "Deltas", b: "Deltas") -> "Deltas":
+        return cls(
+            d_xyz=torch.cat([a.d_xyz, b.d_xyz], dim=0),
+            d_rotation=torch.cat([a.d_rotation, b.d_rotation], dim=0),
+            d_scaling=torch.cat([a.d_scaling, b.d_scaling], dim=0),
+        )
+
+    def to_tuple(self):
+        return (self.d_xyz, self.d_rotation, self.d_scaling)
+
+    def __repr__(self):
+        return f"Deltas(x={self.d_xyz.shape}, rot={self.d_rotation.shape}, scale={self.d_scaling.shape})"
+
+    
+
 class DecoupledModel:
+    _static_deltas = Deltas.from_tuple((0.0, 0.0, 0.0))
+
     def __init__(
             self, 
             sh_degree: int,
@@ -20,66 +62,54 @@ class DecoupledModel:
 
         self.active_sh_degree = 0
         self.max_sh_degree = sh_degree
+        
+        # Set in self.create_from_pcd()
+        self._Ns = None
+        self._Nd = None
 
-        self._delta_buffers = None
-        self._time_input = None
         self._ast_noise = None
+        
 
-    def _concat_attr(self, attr_name: str):
+    def _concat_attr(self, attr_name: str) -> torch.Tensor:
         static_attr = getattr(self.static, attr_name)
         dynamic_attr = getattr(self.dynamic, attr_name)
         return torch.cat([static_attr, dynamic_attr], dim=0)
 
+    def get_models(self):
+        return {"static": self.static, "dynamic": self.dynamic, "composed": self}
+
     def infer_deltas(
             self, 
             fid: torch.Tensor, 
-            iteration: Optional[int], 
-            time_interval: Optional[float], 
-            smooth_term: Optional[torch.tensor],
+            iteration: Optional[int] = None, 
+            time_interval: Optional[float] = None, 
+            smooth_term: Optional[torch.tensor] = None,
             noise: bool=True
-        ):
+        ) -> dict[Literal["static", "dynamic", "composed"], Deltas]:
 
         # TODO - decide whether to use buffering
 
-        Ns = self.static.get_xyz.shape[0]
-        Nd = self.dynamic.get_xyz.shape[0]
-
+        # Noise computation
         if noise:
-            assert iteration is not None and time_interval is not None and smooth_term is not None
+            assert_msg = "Must provide parameters for noise = True; or use noise = False"
+            assert iteration is not None and time_interval is not None and smooth_term is not None, assert_msg
             self._ast_noise.normal_()
             self._ast_noise *= time_interval * smooth_term(iteration)
         else:
             self._ast_noise.zero_()
 
-        self._time_input.copy_(fid.view(1, 1).expand(Nd, 1))
-        self._time_input += self._ast_noise
+        fid_input = fid.view(1, 1).expand(self._Nd, 1)
+        time_input = fid_input + self._ast_noise
 
         xyz = self.dynamic.get_xyz.detach()
-        d_xyz, d_rotation, d_scaling  = self.deform.step(xyz, self._time_input)
+        raw_deltas = self.deform.step(xyz, time_input)
+        dynamic_deltas = Deltas.from_tuple(raw_deltas)
+        static_zeros = Deltas.zeros(self._Ns, device=dynamic_deltas.d_xyz.device)
 
-        buffers = {
-            "d_xyz": d_xyz,
-            "d_scaling": d_scaling,
-            "d_rotation": d_rotation
-        }
+        composed = Deltas.cat(static_zeros, dynamic_deltas)
 
-        for name in ["d_xyz", "d_scaling", "d_rotation"]:
-            buf = self._delta_buffers[name]
-            data = buffers[name]
-            assert buf[Ns:].shape == data.shape, f"{name} shape mismatch: buf={buf[Ns:].shape}, data={data.shape}"
 
-            buf[:Ns].zero_()
-            buf[Ns:] = data.detach()
-
-        static_deltas = (0.0, 0.0, 0.0)
-        dynamic_deltas = (d_xyz, d_rotation, d_scaling)
-        composed_deltas = (
-            self._delta_buffers["d_xyz"].clone(),
-            self._delta_buffers["d_rotation"].clone(),
-            self._delta_buffers["d_scaling"].clone()
-        )
-
-        return static_deltas, dynamic_deltas, composed_deltas
+        return {"static": self._static_deltas, "dynamic": dynamic_deltas, "composed": composed}
 
 
     @property
@@ -112,19 +142,12 @@ class DecoupledModel:
         self.static.create_from_pcd(static_ptc, cameras_extent)
         self.dynamic.create_from_pcd(dynamic_ptc, cameras_extent)
 
-        Ns, Nd = self.static.get_xyz.size(0), self.dynamic.get_xyz.size(0)
+        self._Ns, self._Nd = self.static.get_xyz.size(0), self.dynamic.get_xyz.size(0)
 
-        print("Number of static background Gaussians at init: ", Ns)
-        print("Number of dynamic foreground Gaussians at init: ", Nd)
+        print("Number of static background Gaussians at init: ", self._Ns)
+        print("Number of dynamic foreground Gaussians at init: ", self._Nd)
 
-        self._delta_buffers = {
-            "d_xyz": torch.zeros(Ns + Nd, 3, device="cuda"),
-            "d_scaling": torch.zeros(Ns + Nd, 3, device="cuda"),
-            "d_rotation": torch.zeros(Ns + Nd, 4, device="cuda")
-        }
-
-        self._time_input = torch.zeros(Nd, 1, device="cuda")
-        self._ast_noise = torch.zeros(Nd, 1, device="cuda")
+        self._ast_noise = torch.zeros(self._Nd, 1, device="cuda")
 
     def training_setup(self, training_args):
         self.deform.train_setting(training_args)
