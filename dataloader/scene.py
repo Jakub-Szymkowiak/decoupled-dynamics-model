@@ -60,7 +60,7 @@ class Frame:
         mask = (conf_flat > conf_thrs) 
 
         if use_masks:
-            inv_dmask_flat = ~dmask.flatten().astype(bool)
+            inv_dmask_flat = dmask.flatten().astype(bool)
             mask = mask & inv_dmask_flat
 
         points = points_world[mask]
@@ -98,7 +98,14 @@ class Scene:
     def create_pointcloud(self, downsample: int=1):
         pts, colors = [], []
 
-        for frame in self._frames:
+        if self.dynamic:
+            ref_frame = len(self.frames) // 2
+            n_frames = 2
+            frames = self._frames[ref_frame-n_frames:ref_frame+n_frames+1]
+        else:
+            frames = self.frames
+
+        for frame in frames:
             p, c, _ = frame.to_points(stride=downsample, conf_thrs=self.conf_thrs, use_masks=self.dynamic)
             pts.append(p)
             colors.append(c)

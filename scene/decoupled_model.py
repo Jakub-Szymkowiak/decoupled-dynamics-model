@@ -1,5 +1,7 @@
 from dataclasses import asdict, dataclass
-from typing import Literal, Optional, Union
+from typing import Dict, Literal, Optional, Union
+
+from pathlib import Path
 
 import torch
 
@@ -85,7 +87,7 @@ class DecoupledModel:
             time_interval: Optional[float] = None, 
             smooth_term: Optional[torch.tensor] = None,
             noise: bool=True
-        ) -> dict[Literal["static", "dynamic", "composed"], Deltas]:
+        ) -> Dict[Literal["static", "dynamic", "composed"], Deltas]:
 
         # TODO - decide whether to use buffering
 
@@ -103,11 +105,10 @@ class DecoupledModel:
 
         xyz = self.dynamic.get_xyz.detach()
         raw_deltas = self.deform.step(xyz, time_input)
+
         dynamic_deltas = Deltas.from_tuple(raw_deltas)
         static_zeros = Deltas.zeros(self._Ns, device=dynamic_deltas.d_xyz.device)
-
         composed = Deltas.cat(static_zeros, dynamic_deltas)
-
 
         return {"static": self._static_deltas, "dynamic": dynamic_deltas, "composed": composed}
 
@@ -161,3 +162,14 @@ class DecoupledModel:
 
         if self.active_sh_degree < self.max_sh_degree:
             self.active_sh_degree += 1
+
+    def load_plys(self, directory: Path):
+        static_path = directory / "static.ply"
+        self.static.load_ply(static_path)
+
+        dynamic_path = directory / "dynamic.ply"
+        self.dynamic.load_ply(dynamic_path)
+
+        self._Ns, self._Nd = self.static.get_xyz.size(0), self.dynamic.get_xyz.size(0)
+        self._ast_noise = torch.zeros(self._Nd, 1, device="cuda")
+

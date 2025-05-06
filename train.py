@@ -188,26 +188,25 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
             vis_filter_dynamic = render_pkg_re_dynamic["visibility_filter"]
             radii_dynamic = render_pkg_re_dynamic["radii"]
             model.dynamic.max_radii2D[vis_filter_dynamic] = torch.max(model.dynamic.max_radii2D[vis_filter_dynamic], radii_dynamic[vis_filter_dynamic])
-
-            # TODO - implement saving logic
             
             # Log and save
-            cur_psnr = training_report(tb_writer, 
-                                       model,
-                                       iteration, 
-                                       loss_static, 
-                                       loss_dynamic,
-                                       loss_composed, 
-                                       iter_start.elapsed_time(iter_end), 
-                                       testing_iterations, scene, 
-                                       render, 
-                                       (pipe, background), 
-                                       dataset.load2gpu_on_the_fly, 
-                                       dataset.is_6dof)
+            curr_psnrs = training_report(tb_writer, 
+                                         model,
+                                         iteration, 
+                                         loss_static, 
+                                         loss_dynamic,
+                                         loss_composed, 
+                                         iter_start.elapsed_time(iter_end), 
+                                         testing_iterations, scene, 
+                                         render, 
+                                         (pipe, background), 
+                                         dataset.load2gpu_on_the_fly, 
+                                         dataset.is_6dof)                
 
             if iteration in testing_iterations:
-                if cur_psnr.item() > best_psnr:
-                    best_psnr = cur_psnr.item()
+                psnr_static, psnr_dynamic, psnr_composed = curr_psnrs
+                if psnr_composed.item() > best_psnr:
+                    best_psnr = psnr_composed.item()
                     best_iteration = iteration
 
             if iteration in saving_iterations:
@@ -302,7 +301,10 @@ def training_report(
         static_cameras = scene.getStaticCameras()
         dynamic_cameras = scene.getDynamicCameras()
 
-        images = torch.tensor([], device="cuda")
+        images_static = torch.tensor([], device="cuda")
+        images_dynamic = torch.tensor([], device="cuda")
+        images_composed = torch.tensor([], device="cuda")
+        
         gts_static = torch.tensor([], device="cuda")
         gts = torch.tensor([], device="cuda")
 
@@ -312,7 +314,7 @@ def training_report(
                 static_viewpoint.load2device()
                 dynamic_viewpoint.load2device()
 
-            fid = dynamic_viewpoint.fid
+            fid = torch.tensor(dynamic_viewpoint.fid, device="cuda")
             deltas = model.infer_deltas(fid, noise=False)
 
             def _get_image(mode: str, viewpoint):
@@ -328,7 +330,11 @@ def training_report(
 
             image_static = _get_image("static", static_viewpoint)
             image_dynamic = _get_image("dynamic", dynamic_viewpoint)
-            image_compsoed = _get_image("composed", dynamic_viewpoint)
+            image_composed = _get_image("composed", dynamic_viewpoint)
+
+            images_static = torch.cat((images_static, image_static.unsqueeze(0)), dim=0)
+            images_dynamic = torch.cat((images_dynamic, image_dynamic.unsqueeze(0)), dim=0)
+            images_composed = torch.cat((images_composed, image_composed.unsqueeze(0)), dim=0)
             
             gt_static = torch.clamp(static_viewpoint.original_image.to("cuda"), 0.0, 1.0)
             gt_image = torch.clamp(dynamic_viewpoint.original_image.to("cuda"), 0.0, 1.0)
@@ -352,58 +358,24 @@ def training_report(
                     tb_writer.add_images("dynamic" + f"_view_{viewpoint.dynamic.image_name}/ground_truth",
                                          gt_static[None], global_step=iteration)
 
-        psnr_value_static = psnr(images_static, gts).mean()
-        psnr_value_dynamic = torch.tensor(0.0) # not implemented yet
-        psnr_value_composed = psnr(images, gts).mean()
+        psnr_static = psnr(images_static, gts_static).mean()
+        psnr_dynamic = torch.tensor(0.0) # not implemented yet
+        psnr_composed = psnr(images_composed, gts).mean()
+
+        print(f"\n[ITER {iteration}] PSNR: static = {psnr_static} | dynamic = {psnr_dynamic} | composed = {psnr_composed} ")
         
+        if tb_writer:
+            tb_writer.add_scalar("static" + "/loss_viewpoint - psnr", psnr_static, iteration)
+            tb_writer.add_scalar("static" + "/loss_viewpoint - psnr", psnr_dynamic, iteration)
+            tb_writer.add_scalar("static" + "/loss_viewpoint - psnr", psnr_composed, iteration)
 
-        for config in validation_configs:
-            print(config)
-            if config["cameras"] and len(config["cameras"]) > 0:
-                images = torch.tensor([], device="cuda")
-                gts = torch.tensor([], device="cuda")
-                for idx, viewpoint in enumerate(config["cameras"]):
-                    if load2gpu_on_the_fly:
-                        viewpoint.load2device()
+        if tb_writer:
+            tb_writer.add_histogram("scene/opacity_histogram", scene.model.get_opacity, iteration)
+            tb_writer.add_scalar("total_points", scene.get_xyz.shape[0], iteration)
 
-                    fid = viewpoint.fid
-                    deltas = model.infer_deltas(fid, noise=False)
-                    _, _, composed_deltas = deltas
-
-                    image = torch.clamp(renderFunc(viewpoint, 
-                                                   scene.model, 
-                                                   *renderArgs, 
-                                                   composed_deltas[0],
-                                                   composed_deltas[1],
-                                                   composed_deltas[2],
-                                                   is_6dof)["render"],  0.0, 1.0)
-                        
-                    gt_image = torch.clamp(viewpoint.original_image.to("cuda"), 0.0, 1.0)
-                    images = torch.cat((images, image.unsqueeze(0)), dim=0)
-                    gts = torch.cat((gts, gt_image.unsqueeze(0)), dim=0)
-
-                    if load2gpu_on_the_fly:
-                        viewpoint.load2device("cpu")
-                    if tb_writer and (idx < 5):
-                        tb_writer.add_images(config['name'] + "_view_{}/render".format(viewpoint.image_name),
-                                             image[None], global_step=iteration)
-                        if iteration == testing_iterations[0]:
-                            tb_writer.add_images(config['name'] + "_view_{}/ground_truth".format(viewpoint.image_name),
-                                                 gt_image[None], global_step=iteration)
-
-                psnr_value = psnr(images, gts).mean()
-                print(f"\n[ITER {iteration}] PSNR: {psnr_value}")
-                
-                # if tb_writer:
-                #     tb_writer.add_scalar(config['name'] + '/loss_viewpoint - l1_loss', l1_test, iteration)
-                #     tb_writer.add_scalar(config['name'] + '/loss_viewpoint - psnr', psnr_test, iteration)
-
-        # if tb_writer:
-        #     tb_writer.add_histogram("scene/opacity_histogram", scene.gaussians.get_opacity, iteration)
-        #     tb_writer.add_scalar('total_points', scene.gaussians.get_xyz.shape[0], iteration)
         torch.cuda.empty_cache()
 
-    return psnr_value
+        return psnr_static, psnr_dynamic, psnr_composed
 
 
 if __name__ == "__main__":
@@ -417,7 +389,7 @@ if __name__ == "__main__":
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
 
     test_every = 2500
-    test_it_def = list(range(test_every, 30_000, test_every))
+    test_it_def = [10] + list(range(test_every, 30_000, test_every))
     parser.add_argument("--test_iterations", nargs="+", type=int, default=test_it_def)
 
     save_it_def = [1, 1_000, 7_000, 15_000, 30_000]

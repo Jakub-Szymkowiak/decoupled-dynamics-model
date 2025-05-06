@@ -8,6 +8,8 @@ from utils.camera_utils import cameraList_from_camInfos
 
 from typing import List, Optional
 
+from pathlib import Path
+
 from scene.decoupled_model import DecoupledModel
 from scene.gaussian_model import GaussianModel
 
@@ -33,14 +35,13 @@ class Scene:
         # TODO - implement loading logic for rendering
         if load_iteration:
             if load_iteration == -1:
-                self.loaded_iter = None
-                pass
+                self.loaded_iter = searchForMaxIteration(os.path.join(self.model_path, "point_cloud"))
             else:
-                self.loaded_iter = None
-                pass
+                self.loaded_iter = load_iteration
 
         if self.loaded_iter:
-            pass
+            directory = Path(self.model_path) / "point_cloud" / f"_{self.loaded_iter}"
+            model.load_plys(directory)
         else:
             self.model.create_from_pcd(
                 scene_info.static_ptc, 

@@ -66,17 +66,17 @@ class SceneInfo(NamedTuple):
     dynamic_cameras: list
 
 
-def read_scene(root: Path, subdir: str, conf_thrs: float, is_dynamic: bool, preview_path: Optional[Path]=False):
+def read_scene(root: Path, subdir: str, conf_thrs: float, is_dynamic: bool, preview_path: Optional[Path]=None):
     subdir = Path(subdir)
     spec = SceneSpec(root=root, subdir=subdir, dynamic=is_dynamic)
     frames = load_scene_data(spec)
     scene = Scene(frames, dynamic=is_dynamic)
 
     scene.align_poses()
-    scene.create_pointcloud(downsample=4)
+    scene.create_pointcloud(downsample=1 if is_dynamic else 3)
     scene.normalize()
 
-    if preview_path:
+    if preview_path is not None:
         preview = Preview(scene)
 
         config = PreviewConfig(pointcloud=True,
@@ -85,7 +85,8 @@ def read_scene(root: Path, subdir: str, conf_thrs: float, is_dynamic: bool, prev
                                bounding_box=True,
                                world_axes=False,
                                save_json=False,
-                               frames_downsample=6)
+                               frames_downsample=6,
+                               dist=.5)
 
         preview.render(output_path=preview_path, config=config)
         
@@ -142,8 +143,14 @@ def read_cam_info_from_scene(scene: Scene, idx: int, is_dynamic: bool=False):
 def readMonST3RSceneInfo(path):
     root = Path(path)
 
-    static_scene = read_scene(root, "static", conf_thrs=0.0, is_dynamic=False)
-    dynamic_scene = read_scene(root, "dynamic", conf_thrs=0.6, is_dynamic=True) # uses masking
+    # Preview
+    preview_path_static = Path("./static_preview.png").resolve()
+    preview_path_dynamic = Path("./dynamic_preview.png").resolve()
+
+    static_scene = read_scene(root, "static", conf_thrs=0.0, 
+                              is_dynamic=False, preview_path=preview_path_static)
+    dynamic_scene = read_scene(root, "dynamic", conf_thrs=0.6, 
+                              is_dynamic=True, preview_path=preview_path_dynamic) # uses masking
 
     mismatch_msg = "Static and dynamic sequence length mismatch"
     assert static_scene.num_frames == dynamic_scene.num_frames, mismatch_msg
