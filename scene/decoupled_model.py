@@ -112,6 +112,12 @@ class DecoupledModel:
 
         return {"static": self._static_deltas, "dynamic": dynamic_deltas, "composed": composed}
 
+    def get_zero_deltas(self) -> Deltas:
+        return {
+            "static": Deltas.from_tuple((0.0, 0.0, 0.0)),
+            "dynamic": Deltas.from_tuple((0.0, 0.0, 0.0)),
+            "composed": Deltas.from_tuple((0.0, 0.0, 0.0))
+        }
 
     @property
     def get_xyz(self):

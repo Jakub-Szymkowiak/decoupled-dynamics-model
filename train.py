@@ -34,6 +34,15 @@ except ImportError:
     TENSORBOARD_FOUND = False
 
 
+def get_rendering_func(model, pipe, background, is_6dof):
+    def run_renderer(mode, deltas, viewpoint):
+        return render(viewpoint, model.get_models()[mode], pipe, background, 
+                      deltas[mode].d_xyz, deltas[mode].d_rotation, deltas[mode].d_scaling, 
+                      is_6dof)
+
+    return run_renderer
+
+
 def training(dataset, opt, pipe, testing_iterations, saving_iterations):
     tb_writer = prepare_output_and_logger(dataset)
 
@@ -44,6 +53,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
 
     bg_color = [1, 1, 1] if dataset.white_background else [0, 0, 0]
     background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
+
+    run_renderer = get_rendering_func(model, pipe, background, dataset.is_6dof)
 
     iter_start = torch.cuda.Event(enable_timing=True)
     iter_end = torch.cuda.Event(enable_timing=True)
@@ -100,10 +111,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
         fid = torch.tensor(viewpoint_cam_dynamic.fid, device="cuda")
 
         # Deform model inference
-        if iteration < 0: # < opt.warm_up:
-            static_deltas = (0.0, 0.0, 0.0)
-            dynamic_deltas = (0.0, 0.0, 0.0)
-            composed_deltas = (0.0, 0.0, 0.0)
+        if iteration < opt.warm_up:
+            deltas = model.get_zero_deltas()
         else:
             deltas = model.infer_deltas(fid, iteration, time_interval, smooth_term)
 
@@ -113,16 +122,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
         gt_image_static = viewpoint_cam_static.original_image.cuda()
         gt_image = viewpoint_cam_dynamic.original_image.cuda()
 
-        def _run_renderer(mode: str, viewpoint):
-            return render(viewpoint, 
-                          model.get_models()[mode], pipe, background, 
-                          deltas[mode].d_xyz, 
-                          deltas[mode].d_rotation, 
-                          deltas[mode].d_scaling, 
-                          dataset.is_6dof)
-
         # 1. Render static background
-        render_pkg_re_static = _run_renderer("static", viewpoint_cam_static)
+        render_pkg_re_static = run_renderer("static", deltas, viewpoint_cam_static)
         static_render = render_pkg_re_static["render"]
 
         Ll1_static = l1_loss(static_render, gt_image_static)
@@ -132,7 +133,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
         loss += loss_static * opt.lambda_static
 
         # 2. Render dynamic object
-        render_pkg_re_dynamic =_run_renderer("dynamic", viewpoint_cam_dynamic)
+        render_pkg_re_dynamic = run_renderer("dynamic", deltas, viewpoint_cam_dynamic)
         dynamic_render = render_pkg_re_dynamic["render"]
 
         Ll1_dynamic = l1_loss(dynamic_render, gt_image)
@@ -142,7 +143,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
         loss += loss_dynamic * opt.lambda_dynamic
 
         # 3. Render composed 
-        render_pkg_re_composed = _run_renderer("composed", viewpoint_cam_dynamic)
+        render_pkg_re_composed = run_renderer("composed", deltas, viewpoint_cam_dynamic)
         composed_render = render_pkg_re_composed["render"]
 
         Ll1_composed = l1_loss(composed_render, gt_image)
@@ -153,13 +154,15 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
 
         loss.backward()
 
+        losses = {"static": loss_static, "dynamic": loss_dynamic, "composed": loss_composed} 
+
         # DEBUG
 
-        from torchvision.utils import save_image
-        save_image(composed_render, "comp.png")
-        save_image(static_render, "stat.png")
-        save_image(dynamic_render, "dyna.png")
-        save_image(gt_image, "gtimage.png")
+        # from torchvision.utils import save_image
+        # save_image(composed_render, "comp.png")
+        # save_image(static_render, "stat.png")
+        # save_image(dynamic_render, "dyna.png")
+        # save_image(gt_image, "gtimage.png")
 
 
         if dataset.load2gpu_on_the_fly:
@@ -190,18 +193,10 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
             model.dynamic.max_radii2D[vis_filter_dynamic] = torch.max(model.dynamic.max_radii2D[vis_filter_dynamic], radii_dynamic[vis_filter_dynamic])
             
             # Log and save
-            curr_psnrs = training_report(tb_writer, 
-                                         model,
-                                         iteration, 
-                                         loss_static, 
-                                         loss_dynamic,
-                                         loss_composed, 
-                                         iter_start.elapsed_time(iter_end), 
-                                         testing_iterations, scene, 
-                                         render, 
-                                         (pipe, background), 
-                                         dataset.load2gpu_on_the_fly, 
-                                         dataset.is_6dof)                
+            curr_psnrs = training_report(tb_writer, model, iteration, 
+                                         losses, iter_start.elapsed_time(iter_end), testing_iterations, 
+                                         scene, pipe, background, 
+                                         dataset.load2gpu_on_the_fly, dataset.is_6dof)                
 
             if iteration in testing_iterations:
                 psnr_static, psnr_dynamic, psnr_composed = curr_psnrs
@@ -271,28 +266,18 @@ def prepare_output_and_logger(args):
     return tb_writer
 
 
-def training_report(
-        tb_writer, 
-        model,
-        iteration, 
-        loss_static,
-        loss_dynamic, 
-        loss_composed, 
-        elapsed, 
-        testing_iterations, 
-        scene: Scene, 
-        renderFunc,
-        renderArgs, 
-        load2gpu_on_the_fly, 
-        is_6dof=False
-    ):
+def training_report(tb_writer, model, iteration, 
+                    losses, elapsed, testing_iterations, 
+                    scene, pipe, background,
+                    load2gpu_on_the_fly, is_6dof=False):
 
     if tb_writer:
         tb_writer.add_scalar("train_loss_patches/loss_static", loss_static.item(), iteration)
         tb_writer.add_scalar("train_loss_patches/loss_dynamic", loss_dynamic.item(), iteration)
         tb_writer.add_scalar("train_loss_patches/loss_composed", loss_composed.item(), iteration)
         tb_writer.add_scalar("iter_time", elapsed, iteration)
-
+    
+    run_renderer = get_rendering_func(model, pipe, background, is_6dof)
     psnr_value = 0.0
 
     if iteration in testing_iterations:
@@ -317,16 +302,7 @@ def training_report(
             fid = torch.tensor(dynamic_viewpoint.fid, device="cuda")
             deltas = model.infer_deltas(fid, noise=False)
 
-            def _get_image(mode: str, viewpoint):
-                render = renderFunc(viewpoint, 
-                                    scene.model.get_models()[mode], 
-                                    *renderArgs, 
-                                    deltas[mode].d_xyz, 
-                                    deltas[mode].d_rotation, 
-                                    deltas[mode].d_scaling,
-                                    is_6dof)["render"]
-                                    
-                return torch.clamp(render,  0.0, 1.0)
+            _get_image = lambda mode, viewpoint: torch.clamp(run_renderer(mode, deltas, viewpoint)["render"], 0.0, 1.0)
 
             image_static = _get_image("static", static_viewpoint)
             image_dynamic = _get_image("dynamic", dynamic_viewpoint)

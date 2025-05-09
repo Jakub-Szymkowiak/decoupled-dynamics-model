@@ -153,3 +153,11 @@ class Scene:
         self._pointcloud.xyz = xyz[mask]
         self._pointcloud.rgb = self._pointcloud.rgb[mask]
         self._pointcloud.normals = self._pointcloud.normals[mask]
+
+
+
+
+
+
+
+        
