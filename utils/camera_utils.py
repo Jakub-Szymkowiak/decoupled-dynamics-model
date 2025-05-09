@@ -15,6 +15,8 @@ from utils.general_utils import PILtoTorch, ArrayToTorch
 from utils.graphics_utils import fov2focal
 import json
 
+import torch
+
 WARNED = False
 
 
@@ -43,15 +45,8 @@ def loadCam(args, id, cam_info, resolution_scale):
 
     # TODO - fix this
     
-    # resized_image_rgb = PILtoTorch(cam_info.image, resolution)
-    import torch
-    resized_image_rgb = torch.from_numpy(cam_info.image).permute(2, 0, 1) / 255.0
-
-    gt_image = resized_image_rgb[:3, ...]
-    loaded_mask = None
-
-    if resized_image_rgb.shape[1] == 4:
-        loaded_mask = resized_image_rgb[3:4, ...]
+    gt_image = torch.from_numpy(cam_info.image.copy()).permute(2, 0, 1) / 255.0
+    loaded_mask = torch.from_numpy(cam_info.dmask.copy()) if cam_info.dmask is not None else None
 
     return Camera(colmap_id=cam_info.uid, R=cam_info.R, T=cam_info.T,
                   FoVx=cam_info.FovX, FoVy=cam_info.FovY,

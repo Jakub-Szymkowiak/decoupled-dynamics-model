@@ -43,10 +43,9 @@ class Scene:
             directory = Path(self.model_path) / "point_cloud" / f"_{self.loaded_iter}"
             model.load_plys(directory)
         else:
-            self.model.create_from_pcd(
-                scene_info.static_ptc, 
-                scene_info.dynamic_ptc, 
-                self.cameras_extent)
+            self.model.create_from_pcd(scene_info.static_ptc, 
+                                      scene_info.dynamic_ptc, 
+                                      self.cameras_extent)
 
         # TODO - implement shuffling logic
         if shuffle:

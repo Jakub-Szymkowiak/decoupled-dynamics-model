@@ -52,6 +52,9 @@ class CameraInfo(NamedTuple):
     depth: np.array
     depth_path: str
 
+    dmask: np.array
+    dmask_path: str
+
     width: int
     height: int
 
@@ -73,7 +76,7 @@ def read_scene(root: Path, subdir: str, conf_thrs: float, is_dynamic: bool, prev
     scene = Scene(frames, dynamic=is_dynamic)
 
     scene.align_poses()
-    scene.create_pointcloud(downsample=1 if is_dynamic else 1)
+    scene.create_pointcloud(downsample=1 if is_dynamic else 3)
     scene.normalize()
 
     if preview_path is not None:
@@ -129,15 +132,20 @@ def read_cam_info_from_scene(scene: Scene, idx: int, is_dynamic: bool=False):
     depth_path = str(frame.paths["depth"])
 
     if is_dynamic:
+        dmask = frame.dmask
+        dmask_path = str(frame.paths["dmask"])
         fid = float(idx / (num_frames - 1))
     else:
+        dmask = None # no mask for static background frames
+        dmask_path = None
         fid = None # no fid for static background frames
 
     cam_info = CameraInfo(uid=uid, fid=fid, 
                           R=R, T=T, FovX=FovX, FovY=FovY,
                           image_name=image_name,
-                          image=image, image_path=str(image_path),
-                          depth=depth, depth_path=str(depth_path),
+                          image=image, image_path=image_path,
+                          depth=depth, depth_path=depth_path,
+                          dmask=dmask, dmask_path=dmask_path,
                           width=width, height=height,
                           dynamic=is_dynamic)
 
@@ -148,8 +156,9 @@ def readMonST3RSceneInfo(path):
     root = Path(path)
 
     # Preview
-    preview_path_static = Path("./static_preview.png").resolve()
-    preview_path_dynamic = Path("./dynamic_preview.png").resolve()
+    # preview_path_static = Path("./static_preview.png").resolve()
+    # preview_path_dynamic = Path("./dynamic_preview.png").resolve()
+    preview_path_static, preview_path_dynamic = None, None
 
     static_scene = read_scene(root, "static", conf_thrs=0.0, 
                               is_dynamic=False, preview_path=preview_path_static)

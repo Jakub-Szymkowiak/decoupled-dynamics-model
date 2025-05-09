@@ -34,6 +34,8 @@ except ImportError:
     TENSORBOARD_FOUND = False
 
 
+# future TODO: move to utils
+
 def get_rendering_func(model, pipe, background, is_6dof):
     def run_renderer(mode, deltas, viewpoint):
         return render(viewpoint, model.get_models()[mode], pipe, background, 
@@ -41,6 +43,11 @@ def get_rendering_func(model, pipe, background, is_6dof):
                       is_6dof)
 
     return run_renderer
+
+def mask_image(image: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    assert image.shape[0] == 3 and image.ndim == 3
+    assert mask.shape[0] == 1 and mask.shape[1:] == image.shape[1:]
+    return image * (mask > 0)
 
 
 def training(dataset, opt, pipe, testing_iterations, saving_iterations):
@@ -121,8 +128,10 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
 
         gt_image_static = viewpoint_cam_static.original_image.cuda()
         gt_image = viewpoint_cam_dynamic.original_image.cuda()
-
-        # 1. Render static background
+        # gt_image_masked =  
+        
+        ## RENDER AND LOSS COMPUTATION
+        # STATIC BACKGROUND
         render_pkg_re_static = run_renderer("static", deltas, viewpoint_cam_static)
         static_render = render_pkg_re_static["render"]
 
@@ -132,17 +141,20 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
         loss_static = (1.0 - opt.lambda_dssim) * Ll1_static + opt.lambda_dssim * (1.0 - ssim_static)
         loss += loss_static * opt.lambda_static
 
-        # 2. Render dynamic object
+        # DYNAMIC FOREGROUND OBJECT
         render_pkg_re_dynamic = run_renderer("dynamic", deltas, viewpoint_cam_dynamic)
         dynamic_render = render_pkg_re_dynamic["render"]
 
-        Ll1_dynamic = l1_loss(dynamic_render, gt_image)
-        ssim_dynamic = ssim(dynamic_render, gt_image)
+        masked_dynamic_render = mask_image(dynamic_render, viewpoint_cam_dynamic.gt_alpha_mask.cuda())
+        masked_gt = mask_image(gt_image, viewpoint_cam_dynamic.gt_alpha_mask.cuda())
+
+        Ll1_dynamic = l1_loss(masked_dynamic_render, masked_gt)
+        ssim_dynamic = ssim(masked_dynamic_render, masked_gt)
 
         loss_dynamic = (1.0 - opt.lambda_dssim) * Ll1_dynamic + opt.lambda_dssim * (1.0 - ssim_dynamic)
         loss += loss_dynamic * opt.lambda_dynamic
 
-        # 3. Render composed 
+        # COMPOSED - FULL SCENE 
         render_pkg_re_composed = run_renderer("composed", deltas, viewpoint_cam_dynamic)
         composed_render = render_pkg_re_composed["render"]
 
@@ -155,15 +167,6 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
         loss.backward()
 
         losses = {"static": loss_static, "dynamic": loss_dynamic, "composed": loss_composed} 
-
-        # DEBUG
-
-        # from torchvision.utils import save_image
-        # save_image(composed_render, "comp.png")
-        # save_image(static_render, "stat.png")
-        # save_image(dynamic_render, "dyna.png")
-        # save_image(gt_image, "gtimage.png")
-
 
         if dataset.load2gpu_on_the_fly:
             viewpoint_cam_static.load2device("cpu")
@@ -364,8 +367,8 @@ if __name__ == "__main__":
     parser.add_argument('--port', type=int, default=6009)
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
 
-    test_every = 2500
-    test_it_def = [10] + list(range(test_every, 30_000, test_every))
+    test_every = 2500 # test every 2.5k iterations
+    test_it_def = list(range(test_every, 30_000, test_every))
     parser.add_argument("--test_iterations", nargs="+", type=int, default=test_it_def)
 
     save_it_def = [1, 1_000, 7_000, 15_000, 30_000]
