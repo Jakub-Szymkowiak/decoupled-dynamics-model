@@ -116,7 +116,7 @@ class Scene:
         self._pointcloud = PointCloud(xyz=xyz, rgb=rgb)
         self._pointcloud.estimate_normals()
 
-    def normalize(self, radius: float = 0.01) -> None:
+    def normalize(self, radius: float=0.05) -> None:
         assert self._pointcloud is not None, "Pointcloud must be created before normalization"
 
         base = np.array([f.pose.T for f in self._frames])
@@ -129,9 +129,8 @@ class Scene:
 
         for frame in self._frames:
             frame.pose = frame.pose.rescaled(scale=scale, translation=center)
-            frame.intrinsics = frame.intrinsics.rescaled(scale=scale)
+            #frame.intrinsics = frame.intrinsics.rescaled(scale=scale)
 
-        self._switch_opengl()
 
     def align_poses(self, ref_frame_id: Optional[int]=None):
         if ref_frame_id is None:
@@ -154,13 +153,3 @@ class Scene:
         self._pointcloud.xyz = xyz[mask]
         self._pointcloud.rgb = self._pointcloud.rgb[mask]
         self._pointcloud.normals = self._pointcloud.normals[mask]
-
-    def _switch_opengl(self):
-        F = np.diag([1, -1, -1])
-        for frame in self._frames:
-            R = F @ frame.pose.R @ F
-            T = F @ frame.pose.T
-            mat = np.eye(4)
-            mat[:3, :3] = R
-            mat[:3, 3] = T
-            frame.pose = Pose.from_homogeneous(mat)

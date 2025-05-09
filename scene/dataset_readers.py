@@ -73,22 +73,26 @@ def read_scene(root: Path, subdir: str, conf_thrs: float, is_dynamic: bool, prev
     scene = Scene(frames, dynamic=is_dynamic)
 
     scene.align_poses()
-    scene.create_pointcloud(downsample=1 if is_dynamic else 3)
+    scene.create_pointcloud(downsample=1 if is_dynamic else 1)
     scene.normalize()
 
     if preview_path is not None:
         preview = Preview(scene)
 
         config = PreviewConfig(pointcloud=True,
-                               frame_poses=False,
+                               frame_poses=True,
                                camera_trace=True,
                                bounding_box=True,
                                world_axes=False,
                                save_json=False,
-                               frames_downsample=6,
-                               dist=.5)
+                               frames_downsample=1,
+                               azim=180,
+                               elev=90,
+                               dist=10)
 
         preview.render(output_path=preview_path, config=config)
+
+    
         
     return scene
 
@@ -114,7 +118,7 @@ def read_cam_info_from_scene(scene: Scene, idx: int, is_dynamic: bool=False):
     pose = frame.pose
     view = pose.inverse
 
-    R, T = view.R.T, view.T # view.R.T ?
+    R, T = view.R.T, view.T
 
     image = frame.image
     depth = frame.depth

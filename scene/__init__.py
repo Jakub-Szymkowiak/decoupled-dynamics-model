@@ -48,8 +48,6 @@ class Scene:
                 scene_info.dynamic_ptc, 
                 self.cameras_extent)
 
-        scene_info = sceneLoadTypeCallbacks["ours"](args.source_path)
-
         # TODO - implement shuffling logic
         if shuffle:
             pass

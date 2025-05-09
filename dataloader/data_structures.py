@@ -120,17 +120,15 @@ class Pose:
 
     @classmethod
     def from_homogeneous(cls, H: np.ndarray) -> "Pose":
-        if H.shape != (4, 4):
-            raise ValueError("Homogeneous matrix must be 4x4.")
+        assert H.shape == (4, 4), "Homogeneous matrix must be 4x4."
 
         R = H[:3, :3]
-        t = H[:3, 3]
+        T = H[:3, 3]
 
         q = Rotation.from_matrix(R).as_quat()
         q_wxyz = np.array([q[3], q[0], q[1], q[2]])
 
-        pose_vec = np.concatenate([t, q_wxyz])
-
+        pose_vec = np.concatenate([T, q_wxyz])
         return cls(pose_vec)
         
 

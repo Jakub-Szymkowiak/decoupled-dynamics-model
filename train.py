@@ -155,11 +155,11 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
 
         # DEBUG
 
-        # from torchvision.utils import save_image
-        # save_image(composed_render, "comp.png")
-        # save_image(static_render, "stat.png")
-        # save_image(dynamic_render, "dyna.png")
-        # save_image(gt_image, "gtimage.png")
+        from torchvision.utils import save_image
+        save_image(composed_render, "comp.png")
+        save_image(static_render, "stat.png")
+        save_image(dynamic_render, "dyna.png")
+        save_image(gt_image, "gtimage.png")
 
 
         if dataset.load2gpu_on_the_fly:
