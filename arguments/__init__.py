@@ -98,7 +98,7 @@ class OptimizationParams(ParamGroup):
         self.densify_grad_threshold = 0.0007
 
         self.lambda_static = 1.0
-        self.lambda_dynamic = 1.0
+        self.lambda_dynamic = 10.0
         self.lambda_composed = 1.0
         super().__init__(parser, "Optimization Parameters")
 

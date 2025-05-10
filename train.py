@@ -25,6 +25,7 @@ from arguments import ModelParams, PipelineParams, OptimizationParams
 
 
 from scene.decoupled_model import DecoupledModel
+from utils.render_utils import get_rendering_func, mask_image
 
 
 try:
@@ -34,29 +35,13 @@ except ImportError:
     TENSORBOARD_FOUND = False
 
 
-# future TODO: move to utils
-
-def get_rendering_func(model, pipe, background, is_6dof):
-    def run_renderer(mode, deltas, viewpoint):
-        return render(viewpoint, model.get_models()[mode], pipe, background, 
-                      deltas[mode].d_xyz, deltas[mode].d_rotation, deltas[mode].d_scaling, 
-                      is_6dof)
-
-    return run_renderer
-
-def mask_image(image: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-    assert image.shape[0] == 3 and image.ndim == 3
-    assert mask.shape[0] == 1 and mask.shape[1:] == image.shape[1:]
-    return image * (mask > 0)
-
-
 def training(dataset, opt, pipe, testing_iterations, saving_iterations):
     tb_writer = prepare_output_and_logger(dataset)
 
     model = DecoupledModel(dataset.sh_degree, dataset.is_blender, dataset.is_6dof)
-    model.training_setup(opt)
 
     scene = Scene(dataset, model)
+    model.training_setup(opt) # must be called after Scene is created
 
     bg_color = [1, 1, 1] if dataset.white_background else [0, 0, 0]
     background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
@@ -174,6 +159,14 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
 
         # image, viewspace_point_tensor, visibility_filter, radii = render_pkg_re["render"], render_pkg_re["viewspace_points"], render_pkg_re["visibility_filter"], render_pkg_re["radii"]
         # depth = render_pkg_re["depth"]
+
+        # DEBUG - save images
+
+        # from torchvision.utils import save_image as si
+
+        # si(composed_render, "cmp.png")
+        # si(static_render, "st.png")
+        # si(masked_dynamic_render, "masked_d.png")
 
         iter_end.record()
 

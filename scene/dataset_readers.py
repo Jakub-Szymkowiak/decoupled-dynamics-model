@@ -69,14 +69,26 @@ class SceneInfo(NamedTuple):
     dynamic_cameras: list
 
 
-def read_scene(root: Path, subdir: str, conf_thrs: float, is_dynamic: bool, preview_path: Optional[Path]=None):
+def read_scene(root: Path, subdir: str, is_dynamic: bool, preview_path: Optional[Path]=None):
     subdir = Path(subdir)
     spec = SceneSpec(root=root, subdir=subdir, dynamic=is_dynamic)
     frames = load_scene_data(spec)
     scene = Scene(frames, dynamic=is_dynamic)
 
     scene.align_poses()
-    scene.create_pointcloud(downsample=1 if is_dynamic else 3)
+    
+    downsample   = 1   if is_dynamic else 2
+    conf_thrs    = 0.6 if is_dynamic else 0.0
+    half_window  = None #   if is_dynamic else None
+    ref_frame_id = 0   if is_dynamic else None
+
+    scene.create_pointcloud(
+        downsample=downsample,
+        conf_thrs=conf_thrs,
+        half_window=half_window,
+        ref_frame_id=ref_frame_id
+    )
+
     scene.normalize()
 
     if preview_path is not None:
@@ -160,11 +172,9 @@ def readMonST3RSceneInfo(path):
     # preview_path_dynamic = Path("./dynamic_preview.png").resolve()
     preview_path_static, preview_path_dynamic = None, None
 
-    static_scene = read_scene(root, "static", conf_thrs=0.0, 
-                              is_dynamic=False, preview_path=preview_path_static)
-    dynamic_scene = read_scene(root, "dynamic", conf_thrs=0.6, 
-                              is_dynamic=True, preview_path=preview_path_dynamic) # uses masking
-
+    static_scene = read_scene(root, "static", is_dynamic=False, preview_path=preview_path_static)
+    dynamic_scene = read_scene(root, "dynamic", is_dynamic=True, preview_path=preview_path_dynamic)
+    
     mismatch_msg = "Static and dynamic sequence length mismatch"
     assert static_scene.num_frames == dynamic_scene.num_frames, mismatch_msg
     num_frames = static_scene.num_frames

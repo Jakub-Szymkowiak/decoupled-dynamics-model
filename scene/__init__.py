@@ -21,7 +21,8 @@ class Scene:
             model: DecoupledModel, 
             resolution_scales: List[float]=[1.0],
             load_iteration: Optional[int]=None, 
-            shuffle: bool=False):
+            shuffle: bool=False
+        ):
 
         self.model_path = args.model_path
         self.loaded_iter = None
@@ -30,7 +31,7 @@ class Scene:
         scene_info = sceneLoadTypeCallbacks["ours"](args.source_path)
 
         # TODO
-        self.cameras_extent = 5.0 
+        self.cameras_extent = 25.0 
 
         # TODO - implement loading logic for rendering
         if load_iteration:
@@ -46,11 +47,6 @@ class Scene:
             self.model.create_from_pcd(scene_info.static_ptc, 
                                       scene_info.dynamic_ptc, 
                                       self.cameras_extent)
-
-        # TODO - implement shuffling logic
-        if shuffle:
-            pass
-
 
         self.static_cams, self.dynamic_cams = {}, {}
         for resolution_scale in resolution_scales:

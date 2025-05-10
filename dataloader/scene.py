@@ -60,8 +60,7 @@ class Frame:
         mask = (conf_flat > conf_thrs) 
 
         if use_masks:
-            inv_dmask_flat = dmask.flatten().astype(bool)
-            mask = mask & inv_dmask_flat
+            mask = mask & dmask.flatten().astype(bool)
 
         points = points_world[mask]
         colors = image.reshape(-1, 3)[mask] / 255.0
@@ -71,11 +70,17 @@ class Frame:
 
 
 class Scene:
-    def __init__(self, frames: List[Frame], dynamic: bool=False, conf_thrs: float=0.6):
+    def __init__(
+            self, 
+            frames: List[Frame], 
+            dynamic: bool=False
+        ):
+
         assert all(isinstance(f, Frame) for f in frames), "All elements must be Frame instances"
+
         self._frames = frames
         self.dynamic = dynamic
-        self.conf_thrs = conf_thrs
+
         self._pointcloud = None
 
     @property
@@ -95,18 +100,29 @@ class Scene:
     def get_frame(self, frame_id: int) -> Frame:
         return self._frames[frame_id]
 
-    def create_pointcloud(self, downsample: int=1):
+    def create_pointcloud(
+            self, 
+            downsample: int=1,
+            conf_thrs: float=0.0,
+            half_window: Optional[int]=None,
+            ref_frame_id: Optional[int]=None
+        ):
+
         pts, colors = [], []
 
-        if self.dynamic:
-            ref_frame = len(self.frames) // 2
-            n_frames = 2
-            frames = self._frames[ref_frame-n_frames:ref_frame+n_frames+1]
+        if half_window is not None: 
+            if ref_frame_id is None:
+                ref_frame_id = len(self.frames) // 2 # middle
+
+            s, e = ref_frame_id - half_window, ref_frame_id + half_window + 1 # start, end
+            s = max(0, s)
+            frames = self._frames[s:e]
         else:
-            frames = self.frames
+            frames = self._frames # sample from all frames
 
         for frame in frames:
-            p, c, _ = frame.to_points(stride=downsample, conf_thrs=self.conf_thrs, use_masks=self.dynamic)
+            frame.intrinsics = frame.intrinsics.rescaled(1.0 / downsample)
+            p, c, _ = frame.to_points(stride=downsample, conf_thrs=conf_thrs, use_masks=self.dynamic)
             pts.append(p)
             colors.append(c)
 
@@ -129,12 +145,10 @@ class Scene:
 
         for frame in self._frames:
             frame.pose = frame.pose.rescaled(scale=scale, translation=center)
-            #frame.intrinsics = frame.intrinsics.rescaled(scale=scale)
-
 
     def align_poses(self, ref_frame_id: Optional[int]=None):
         if ref_frame_id is None:
-            ref_frame_id = len(self._frames) // 2
+            ref_frame_id = len(self._frames) // 2 # middle
 
         ref_pose_inv = np.linalg.inv(self._frames[ref_frame_id].pose.homogeneous)
 

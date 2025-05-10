@@ -29,6 +29,7 @@ import time
 from pathlib import Path
 
 from scene.decoupled_model import DecoupledModel
+from utils.render_utils import get_rendering_func
 
 
 def render_set(
@@ -43,13 +44,15 @@ def render_set(
     ):
 
     root = Path(model_path).resolve()
-    render_path = root / "renders" / f"_{iteration}"
-    depth_path = root / "renders" / f"_{iteration}"
+    render_path = root / "renders" / f"_{iteration}" / "images"
+    depth_path = root / "renders" / f"_{iteration}" / "depths"
 
     render_path.mkdir(parents=True, exist_ok=True)
     depth_path.mkdir(parents=True, exist_ok=True)
 
     t_list = [] # store render times
+
+    run_renderer = get_rendering_func(model, pipeline, background, is_6dof)
 
     # Saving loop
     for idx, view in enumerate(tqdm(views, desc="Rendering process:")):
@@ -59,17 +62,7 @@ def render_set(
         fid = torch.as_tensor(view.fid, device="cuda")
         deltas = model.infer_deltas(fid, noise=False)
 
-        def _run_renderer(mode: str, viewpoint):
-            return render(viewpoint, 
-                          model.get_models()[mode], 
-                          pipeline, 
-                          background, 
-                          deltas[mode].d_xyz, 
-                          deltas[mode].d_rotation, 
-                          deltas[mode].d_scaling, 
-                          is_6dof)
-
-        results = _run_renderer("composed", view)
+        results = run_renderer("composed", deltas, view)
 
         rendering = results["render"]
         depth = results["depth"]
@@ -87,18 +80,8 @@ def render_set(
         t_start = time.time()
         
         deltas = model.infer_deltas(fid, noise=False)
-
-        def _run_renderer(mode: str, viewpoint):
-            return render(viewpoint, 
-                          model.get_models()[mode], 
-                          pipeline, 
-                          background, 
-                          deltas[mode].d_xyz, 
-                          deltas[mode].d_rotation, 
-                          deltas[mode].d_scaling, 
-                          is_6dof)
-
-        results = _run_renderer("composed", view)
+        
+        results = run_renderer("composed", deltas, view)
 
         torch.cuda.synchronize()
 
