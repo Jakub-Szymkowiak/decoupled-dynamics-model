@@ -20,8 +20,8 @@ class Scene:
             self, 
             args: ModelParams, 
             model: DecoupledModel, 
-            resolution_scales: List[float]=[1.0],
-            load_iteration: Optional[int]=None, 
+            resolution_scales: List[float] = [1.0],
+            load_iteration: Optional[int] = None, 
             shuffle: bool=False
         ):
 
@@ -46,22 +46,17 @@ class Scene:
             directory = Path(self.model_path) / "point_cloud" / f"_{self.loaded_iter}"
             model.load_plys(directory)
         else:
-            self.model.create_from_pcd(scene_info.static_ptc, 
-                                      scene_info.dynamic_ptc, 
+            self.model.create_from_pcd(scene_info.pointclouds["static"], 
+                                      scene_info.pointclouds["dynamic"], 
                                       self.cameras_extent,
                                       scene_info.centroids)
 
-        self.static_cams, self.dynamic_cams = {}, {}
+        self.cameras = {}
         for resolution_scale in resolution_scales:
-            _get_cam_list = lambda cams: cameraList_from_camInfos(cams, resolution_scale, args)
-            self.static_cams[resolution_scale] = _get_cam_list(scene_info.static_cameras)
-            self.dynamic_cams[resolution_scale] = _get_cam_list(scene_info.dynamic_cameras)
+            self.cameras[resolution_scale] = cameraList_from_camInfos(scene_info.cam_infos)
 
     def save(self, iteration):
         self.model.save(iteration, self.model_path)
 
-    def getStaticCameras(self, scale=1.0):
-        return self.static_cams[scale]
-
-    def getDynamicCameras(self, scale=1.0):
-        return self.dynamic_cams[scale]
+    def getCamerasa(self, scale=1.0):
+        return self.cameras[scale]

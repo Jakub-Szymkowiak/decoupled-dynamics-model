@@ -1,33 +1,7 @@
 from dataclasses import dataclass
 from typing import Optional
 
-import numpy as np
-import open3d as o3d
-
-from pathlib import Path
-
 from scipy.spatial.transform import Rotation
-
-
-@dataclass
-class PointCloud:
-    xyz: np.ndarray
-    rgb: np.ndarray   
-    normals: np.ndarray=None
-
-    def rescale(self, scale: float=1.0, translation: np.ndarray=np.zeros(3)):
-        self.xyz = (self.xyz - translation) * scale
-
-    def estimate_normals(self, knn=30):
-        pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(self.xyz)
-        pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamKNN(knn=knn ))
-        self.normals = np.asarray(pcd.normals)
-
-    def normalize_normals(self):
-        normals = self.normals
-        norms = np.linalg.norm(normals, axis=1, keepdims=True)
-        self.normals = normals / np.where(norms == 0, 1e-8, norms)
 
 
 @dataclass
@@ -107,10 +81,10 @@ class Pose:
 
     @property 
     def forward_direction(self) -> np.ndarray:
-        return -self.R[:, 2] # OpenGL 
+        return -self.R[:, 2] 
 
     def rescaled(self, scale: float=1.0, translation: np.ndarray=np.zeros(3)):
-        H = self.homogeneous
+        H = self.homogeneous.copy()
         H[:3, 3] -= translation
         H[:3, 3] *= scale
         return Pose.from_homogeneous(H)
@@ -130,56 +104,3 @@ class Pose:
 
         pose_vec = np.concatenate([T, q_wxyz])
         return cls(pose_vec)
-        
-
-@dataclass
-class SceneSpec:
-    root: Path
-    subdir: Path = Path(".")
-    
-    image_dir: Path = Path("images")
-    depth_dir: Path = Path("depths")
-    conf_dir: Path = Path("confs")
-    
-    intrinsics_file: Path = Path("pred_intrinsics.txt")
-    trajectory_file: Path = Path("pred_traj.txt")
-
-    dynamic: Optional[bool]=False
-    dmask_dir: Path = Path("masks")
-
-    def image_path(self, idx: int) -> Path:
-        return self.root / self.subdir / self.image_dir / f"frame_{idx:04d}.png"
-
-    def depth_path(self, idx: int) -> Path:
-        return self.root / self.subdir / self.depth_dir / f"frame_{idx:04d}.npy"
-
-    def conf_path(self, idx: int) -> Path:
-        return self.root / self.subdir / self.conf_dir / f"conf_{idx}.npy"
-
-    def dmask_path(self, idx: int) -> Path:
-        assert self.dynamic, "Set dynamic = True to load dynamic motion masks"
-        return self.root / self.subdir / self.dmask_dir / f"dynamic_mask_{idx}.png"
-
-    @property
-    def intrinsics_path(self) -> Path:
-        return self.root / self.intrinsics_file
-
-    @property
-    def trajectory_path(self) -> Path:
-        return self.root / self.trajectory_file
-
-
-@dataclass
-class PreviewConfig:
-    pointcloud: bool=True
-    frame_poses: bool=True
-    camera_trace: bool=False
-    bounding_box: bool=True
-    world_axes: bool=True
-    frames_downsample: int=1
-    figsize: tuple=(10, 10)
-    elev: int=20
-    azim: int=60
-    dist: float=10.0
-    axes_range: tuple=(-3, 3)
-    save_json: bool=False
