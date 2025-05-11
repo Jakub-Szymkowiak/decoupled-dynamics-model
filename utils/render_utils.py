@@ -15,3 +15,5 @@ def mask_image(image: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
     assert image.shape[0] == 3 and image.ndim == 3
     assert mask.shape[0] == 1 and mask.shape[1:] == image.shape[1:]
     return image * (mask > 0)
+
+

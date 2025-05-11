@@ -31,6 +31,8 @@ class Scene:
 
         scene_info = sceneLoadTypeCallbacks["ours"](args.source_path)
 
+        self.num_frames = len(scene_info)
+
         # TODO
         self.cameras_extent = 5.0 
 
