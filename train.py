@@ -36,6 +36,12 @@ except ImportError:
 
 
 def training(dataset, opt, pipe, testing_iterations, saving_iterations):
+    composition_scheduler = {
+        "static": list(range(5001, opt.iterations+1)),
+        "dynamic": list(range(1, opt.iterations+1)),
+        "composition": list(range(5001, opt.iterations+1))
+    }
+
     tb_writer = prepare_output_and_logger(dataset)
 
     model = DecoupledModel(dataset.sh_degree, dataset.is_blender, dataset.is_6dof)
@@ -113,41 +119,56 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
 
         gt_image_static = viewpoint_cam_static.original_image.cuda()
         gt_image = viewpoint_cam_dynamic.original_image.cuda()
-        # gt_image_masked =  
         
         ## RENDER AND LOSS COMPUTATION
         # STATIC BACKGROUND
-        render_pkg_re_static = run_renderer("static", deltas, viewpoint_cam_static)
-        static_render = render_pkg_re_static["render"]
+        if iteration in composition_scheduler["static"]:
+            render_pkg_re_static = run_renderer("static", deltas, viewpoint_cam_static)
+            static_render = render_pkg_re_static["render"]
 
-        Ll1_static = l1_loss(static_render, gt_image_static)
-        ssim_static = ssim(static_render, gt_image)
+            Ll1_static = l1_loss(static_render, gt_image_static)
+            ssim_static = ssim(static_render, gt_image)
 
-        loss_static = (1.0 - opt.lambda_dssim) * Ll1_static + opt.lambda_dssim * (1.0 - ssim_static)
-        loss += loss_static * opt.lambda_static
+            loss_static = (1.0 - opt.lambda_dssim) * Ll1_static + opt.lambda_dssim * (1.0 - ssim_static)
+            loss += loss_static * opt.lambda_static
+        else:
+            loss_static = torch.tensor(0.0).cuda()
 
         # DYNAMIC FOREGROUND OBJECT
-        render_pkg_re_dynamic = run_renderer("dynamic", deltas, viewpoint_cam_dynamic)
-        dynamic_render = render_pkg_re_dynamic["render"]
+        if iteration in composition_scheduler["dynamic"]:
+            render_pkg_re_dynamic = run_renderer("dynamic", deltas, viewpoint_cam_dynamic)
+            dynamic_render = render_pkg_re_dynamic["render"]
 
-        masked_dynamic_render = mask_image(dynamic_render, viewpoint_cam_dynamic.gt_alpha_mask.cuda())
-        masked_gt = mask_image(gt_image, viewpoint_cam_dynamic.gt_alpha_mask.cuda())
+            masked_dynamic_render = mask_image(dynamic_render, viewpoint_cam_dynamic.gt_alpha_mask.cuda())
+            masked_gt = mask_image(gt_image, viewpoint_cam_dynamic.gt_alpha_mask.cuda())
 
-        Ll1_dynamic = l1_loss(masked_dynamic_render, masked_gt)
-        ssim_dynamic = ssim(masked_dynamic_render, masked_gt)
+            Ll1_dynamic = l1_loss(masked_dynamic_render, masked_gt)
+            ssim_dynamic = ssim(masked_dynamic_render, masked_gt)
 
-        loss_dynamic = (1.0 - opt.lambda_dssim) * Ll1_dynamic + opt.lambda_dssim * (1.0 - ssim_dynamic)
-        loss += loss_dynamic * opt.lambda_dynamic
+            loss_dynamic = (1.0 - opt.lambda_dssim) * Ll1_dynamic + opt.lambda_dssim * (1.0 - ssim_dynamic)
+            loss += loss_dynamic * opt.lambda_dynamic
+        else:
+            loss_dynamic = torch.tensor(0.0).cuda()
 
         # COMPOSED - FULL SCENE 
-        render_pkg_re_composed = run_renderer("composed", deltas, viewpoint_cam_dynamic)
-        composed_render = render_pkg_re_composed["render"]
+        if iteration in composition_scheduler["static"]:
+            render_pkg_re_composed = run_renderer("composed", deltas, viewpoint_cam_dynamic)
+            composed_render = render_pkg_re_composed["render"]
 
-        Ll1_composed = l1_loss(composed_render, gt_image)
-        ssim_composed = ssim(composed_render, gt_image)
+            Ll1_composed = l1_loss(composed_render, gt_image)
+            ssim_composed = ssim(composed_render, gt_image)
 
-        loss_composed = (1.0 - opt.lambda_dssim) * Ll1_composed + opt.lambda_dssim * (1.0 - ssim_composed)
-        loss += loss_composed * opt.lambda_composed
+            loss_composed = (1.0 - opt.lambda_dssim) * Ll1_composed + opt .lambda_dssim * (1.0 - ssim_composed)
+            loss += loss_composed * opt.lambda_composed
+        else:
+            loss_composed = torch.tensor(0.0).cuda()
+
+        # REGULARIZERS
+        s = model.static.get_scaling.mean(dim=1, keepdim=True)
+        d = ((model.static.get_scaling - s) ** 2).sum(dim=1)
+        m =  model.static.get_scaling.norm(dim=1) ** 1.0
+        reg_loss = d * m
+        loss += reg_loss.mean()
 
         loss.backward()
 
@@ -180,13 +201,15 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
                 progress_bar.close()
 
             # Keep track of max radii in image-space for pruning
-            vis_filter_static = render_pkg_re_static["visibility_filter"]
-            radii_static = render_pkg_re_static["radii"]
-            model.static.max_radii2D[vis_filter_static] = torch.max(model.static.max_radii2D[vis_filter_static], radii_static[vis_filter_static])
+            if iteration in composition_scheduler["static"]:
+                vis_filter_static = render_pkg_re_static["visibility_filter"]
+                radii_static = render_pkg_re_static["radii"]
+                model.static.max_radii2D[vis_filter_static] = torch.max(model.static.max_radii2D[vis_filter_static], radii_static[vis_filter_static])
 
-            vis_filter_dynamic = render_pkg_re_dynamic["visibility_filter"]
-            radii_dynamic = render_pkg_re_dynamic["radii"]
-            model.dynamic.max_radii2D[vis_filter_dynamic] = torch.max(model.dynamic.max_radii2D[vis_filter_dynamic], radii_dynamic[vis_filter_dynamic])
+            if iteration in composition_scheduler["dynamic"]:
+                vis_filter_dynamic = render_pkg_re_dynamic["visibility_filter"]
+                radii_dynamic = render_pkg_re_dynamic["radii"]
+                model.dynamic.max_radii2D[vis_filter_dynamic] = torch.max(model.dynamic.max_radii2D[vis_filter_dynamic], radii_dynamic[vis_filter_dynamic])
             
             # Log and save
             curr_psnrs = training_report(tb_writer, model, iteration, 
@@ -203,7 +226,6 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
             if iteration in saving_iterations:
                 print("\n[ITER {}] Saving Gaussians".format(iteration))
                 scene.save(iteration)
-                scene.model.deform.save_weights(args.model_path, iteration)
             
             # TODO - implement densification logic
 
@@ -361,7 +383,7 @@ if __name__ == "__main__":
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
 
     test_every = 2500 # test every 2.5k iterations
-    test_it_def = list(range(test_every, 30_000, test_every))
+    test_it_def = list(range(test_every, 40_000, test_every))
     parser.add_argument("--test_iterations", nargs="+", type=int, default=test_it_def)
 
     save_it_def = [1, 1_000, 7_000, 15_000, 30_000]

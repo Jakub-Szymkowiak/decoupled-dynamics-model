@@ -6,9 +6,10 @@ from scene.deform_model import DeformModel
 from arguments import ModelParams
 from utils.camera_utils import cameraList_from_camInfos
 
-from typing import List, Optional
+import torch
 
 from pathlib import Path
+from typing import List, Optional
 
 from scene.decoupled_model import DecoupledModel
 from scene.gaussian_model import GaussianModel
@@ -31,7 +32,7 @@ class Scene:
         scene_info = sceneLoadTypeCallbacks["ours"](args.source_path)
 
         # TODO
-        self.cameras_extent = 25.0 
+        self.cameras_extent = 5.0 
 
         # TODO - implement loading logic for rendering
         if load_iteration:
@@ -41,12 +42,14 @@ class Scene:
                 self.loaded_iter = load_iteration
 
         if self.loaded_iter:
+            print(f"Loading at iteration {self.loaded_iter}")
             directory = Path(self.model_path) / "point_cloud" / f"_{self.loaded_iter}"
             model.load_plys(directory)
         else:
             self.model.create_from_pcd(scene_info.static_ptc, 
                                       scene_info.dynamic_ptc, 
-                                      self.cameras_extent)
+                                      self.cameras_extent,
+                                      scene_info.centroids)
 
         self.static_cams, self.dynamic_cams = {}, {}
         for resolution_scale in resolution_scales:
@@ -55,13 +58,7 @@ class Scene:
             self.dynamic_cams[resolution_scale] = _get_cam_list(scene_info.dynamic_cameras)
 
     def save(self, iteration):
-        saving_dir = os.path.join(self.model_path, f"point_cloud/_{iteration}")
-
-        static_ply_path = os.path.join(saving_dir, "static.ply")
-        dynamic_ply_path = os.path.join(saving_dir, "dynamic.ply")
-
-        self.model.static.save_ply(static_ply_path)
-        self.model.dynamic.save_ply(dynamic_ply_path)
+        self.model.save(iteration, self.model_path)
 
     def getStaticCameras(self, scale=1.0):
         return self.static_cams[scale]

@@ -22,6 +22,9 @@ from utils.graphics_utils import BasicPointCloud
 from utils.general_utils import strip_symmetric, build_scaling_rotation
 
 
+import json
+
+
 class GaussianModel:
     def __init__(self, sh_degree: int):
 
@@ -156,6 +159,8 @@ class GaussianModel:
         for i in range(self._rotation.shape[1]):
             l.append('rot_{}'.format(i))
         return l
+
+   
 
     def save_ply(self, path):
         mkdir_p(os.path.dirname(path))

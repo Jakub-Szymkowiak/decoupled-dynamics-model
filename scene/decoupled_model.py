@@ -1,3 +1,5 @@
+import json
+
 from dataclasses import asdict, dataclass
 from typing import Dict, Literal, Optional, Union
 
@@ -103,7 +105,10 @@ class DecoupledModel:
         fid_input = fid.view(1, 1).expand(self._Nd, 1)
         time_input = fid_input + self._ast_noise
 
-        xyz = self.dynamic.get_xyz.detach()
+        xyz = self.dynamic.get_xyz.detach().to(torch.float32)
+        centroid = self.centroids[self.fid_to_id(fid.item())].view(1,3).to(torch.float32)
+        xyz = xyz - centroid.cuda()
+        
         raw_deltas = self.deform.step(xyz, time_input)
 
         dynamic_deltas = Deltas.from_tuple(raw_deltas)
@@ -143,12 +148,17 @@ class DecoupledModel:
             self, 
             static_ptc: BasicPointCloud,
             dynamic_ptc: BasicPointCloud,
-            cameras_extent: float
+            cameras_extent: float,
+            centroids: list
         ):
 
         self.static.create_from_pcd(static_ptc, cameras_extent)
         self.dynamic.create_from_pcd(dynamic_ptc, cameras_extent)
 
+        num_frames = len(centroids)
+        self.fid_to_id = lambda x: round(x * (num_frames - 1))
+        self.centroids = [torch.tensor(c, device="cuda") for c in centroids]
+        
         self._Ns, self._Nd = self.static.get_xyz.size(0), self.dynamic.get_xyz.size(0)
 
         print("Number of static background Gaussians at init: ", self._Ns)
@@ -169,13 +179,34 @@ class DecoupledModel:
         if self.active_sh_degree < self.max_sh_degree:
             self.active_sh_degree += 1
 
-    def load_plys(self, directory: Path):
-        static_path = directory / "static.ply"
-        self.static.load_ply(static_path)
+    def load_centroids(self, path):
+        with open(path, "r") as f:
+            centroid_list = json.load(f)
+        centroids = [torch.tensor(c, dtype=torch.float32, device="cuda") for c in centroid_list]
+        self.centroids = centroids
 
-        dynamic_path = directory / "dynamic.ply"
-        self.dynamic.load_ply(dynamic_path)
+    def load_plys(self, directory: Path):
+        self.static.load_ply(directory / "static.ply")
+        self.dynamic.load_ply(directory / "dynamic.ply")
+        self.load_centroids(directory / "centroids.json")
+
+        num_frames = len(self.centroids)
+        self.fid_to_id = lambda x: round(x * (num_frames - 1))
 
         self._Ns, self._Nd = self.static.get_xyz.size(0), self.dynamic.get_xyz.size(0)
         self._ast_noise = torch.zeros(self._Nd, 1, device="cuda")
 
+
+    def save_centroids(self, path):
+            centroids = [c.tolist() for c in self.centroids]
+            with open(path, "w") as f:
+                json.dump(centroids, f)
+
+    def save(self, iteration, model_path: Path):
+        directory = Path(model_path) / "point_cloud" / f"_{iteration}" 
+
+        self.deform.save_weights(model_path, iteration)
+        self.static.save_ply(directory / "static.ply")
+        self.dynamic.save_ply(directory / "dynamic.ply")
+        self.save_centroids(directory / "centroids.json")
+        

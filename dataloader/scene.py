@@ -27,6 +27,8 @@ class Frame:
         self.intrinsics = intrinsics
         self.pose = pose
 
+        self.centroid = None
+
         self.H, self.W = self.image.shape[:2]
 
         assert self.image.shape[:2] == (self.H, self.W), "Image shape mismatch"
@@ -84,6 +86,10 @@ class Scene:
         self._pointcloud = None
 
     @property
+    def centroids(self):
+        return [f.centroid for f in self._frames]
+
+    @property
     def frames(self) -> List[Frame]:
         return self._frames
 
@@ -125,6 +131,8 @@ class Scene:
             p, c, _ = frame.to_points(stride=downsample, conf_thrs=conf_thrs, use_masks=self.dynamic)
             pts.append(p)
             colors.append(c)
+            
+            frame.centroid = p.mean()
 
         xyz = np.concatenate(pts, axis=0).astype(np.float32)
         rgb = np.concatenate(colors, axis=0).astype(np.float32)
@@ -144,6 +152,7 @@ class Scene:
         self._pointcloud.normalize_normals()
 
         for frame in self._frames:
+            frame.centroid = (frame.centroid - center) * scale 
             frame.pose = frame.pose.rescaled(scale=scale, translation=center)
 
     def align_poses(self, ref_frame_id: Optional[int]=None):
@@ -167,7 +176,6 @@ class Scene:
         self._pointcloud.xyz = xyz[mask]
         self._pointcloud.rgb = self._pointcloud.rgb[mask]
         self._pointcloud.normals = self._pointcloud.normals[mask]
-
 
 
 

@@ -67,6 +67,7 @@ class SceneInfo(NamedTuple):
     dynamic_ptc: BasicPointCloud
     static_cameras: list
     dynamic_cameras: list
+    centroids: list
 
 
 def read_scene(root: Path, subdir: str, is_dynamic: bool, preview_path: Optional[Path]=None):
@@ -82,6 +83,8 @@ def read_scene(root: Path, subdir: str, is_dynamic: bool, preview_path: Optional
     half_window  = None #   if is_dynamic else None
     ref_frame_id = 0   if is_dynamic else None
 
+    trim_distant_percent = 0.0 if is_dynamic else 10.0 # trim top N% most distant poitns
+
     scene.create_pointcloud(
         downsample=downsample,
         conf_thrs=conf_thrs,
@@ -89,6 +92,8 @@ def read_scene(root: Path, subdir: str, is_dynamic: bool, preview_path: Optional
         ref_frame_id=ref_frame_id
     )
 
+    scene.trim_distant(percent=trim_distant_percent)
+ 
     scene.normalize()
 
     if preview_path is not None:
@@ -143,6 +148,8 @@ def read_cam_info_from_scene(scene: Scene, idx: int, is_dynamic: bool=False):
     image_path = str(frame.paths["image"])
     depth_path = str(frame.paths["depth"])
 
+    centroid = frame.centroid
+
     if is_dynamic:
         dmask = frame.dmask
         dmask_path = str(frame.paths["dmask"])
@@ -190,7 +197,8 @@ def readMonST3RSceneInfo(path):
     scene_info = SceneInfo(static_ptc=static_ptc, 
                            dynamic_ptc=dynamic_ptc,
                            static_cameras=static_cam_infos,
-                           dynamic_cameras=dynamic_cam_infos)
+                           dynamic_cameras=dynamic_cam_infos,
+                           centroids=dynamic_scene.centroids)
 
     return scene_info
 
