@@ -31,7 +31,7 @@ class Scene:
 
         scene_info = sceneLoadTypeCallbacks["ours"](args.source_path)
 
-        self.num_frames = len(scene_info)
+        self.num_frames = len(scene_info. cam_infos)
 
         # TODO
         self.cameras_extent = 5.0 
@@ -55,10 +55,12 @@ class Scene:
 
         self.cameras = {}
         for resolution_scale in resolution_scales:
-            self.cameras[resolution_scale] = cameraList_from_camInfos(scene_info.cam_infos)
+            self.cameras[resolution_scale] = cameraList_from_camInfos(scene_info.cam_infos,
+                                                                      resolution_scale, 
+                                                                      args)
 
     def save(self, iteration):
         self.model.save(iteration, self.model_path)
 
-    def getCamerasa(self, scale=1.0):
+    def getCameras(self, scale=1.0):
         return self.cameras[scale]

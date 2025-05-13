@@ -6,6 +6,8 @@ import open3d as o3d
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
+from dataloader.cams import Pose
+from dataloader.frame import Frame
 from utils.graphics_utils import BasicPointCloud
 
 
@@ -15,12 +17,16 @@ class PointCloud:
     rgb: np.ndarray   
     normals: np.ndarray=None
 
+    @property
+    def size(self):
+        return self.xyz.shape[0]
+
     def rescale(self, scale: float=1.0, translation: np.ndarray=np.zeros(3)):
         self.xyz = (self.xyz - translation) * scale
         if self.normals is not None:
             self.normalize_normals()
 
-    def apply_mask(self, mask):
+    def select(self, mask):
         self.xyz = self.xyz[mask]
         self.rgb = self.rgb[mask]
         if self.normals is not None:
@@ -78,13 +84,19 @@ class SceneProcessor:
         if ref_frame_id is None:
             ref_frame_id = self.num_frames // 2
 
-        ref_pose_inv = self.get_frame(ref_frame_id).inverse.homogeneous
+        ref_pose_inv = self.get_frame(ref_frame_id).pose.inverse.homogeneous
         
         for frame in self._frames:
             aligned = ref_pose_inv @ frame.pose.homogeneous
             frame.pose = Pose.from_homogeneous(aligned)
 
-    def create_pointclouds(self, downsample: int=1, conf_thrs: float=0.6):
+    def create_pointclouds(self, downsample: int=1, conf_thrs: float=0.6, num_dynamic_frames: Optional[int]=None):
+        if num_dynamic_frames is not None:
+            if num_dynamic_frames > self.num_frames:
+                warnings.warn(...)
+                num_dynamic_frames = self.num_frames
+        else:
+            num_dynamic_frames = self.num_frames
 
         # rescale intrinsics
         for frame in self._frames:
@@ -98,7 +110,7 @@ class SceneProcessor:
             colors.append(c)
         
         xyz = np.concatenate(pts, axis=0).astype(np.float32)
-        rgb = np.concatenate(colors, axis=0).astype(np.float32)
+        rgb = np.concatenate(colors, axis=0).astype(np.float32) / 255.0
 
         self._static_pointcloud = PointCloud(xyz=xyz, rgb=rgb)
         self._static_pointcloud.estimate_normals()
@@ -113,14 +125,14 @@ class SceneProcessor:
             if p.size == 0:
                 if np.all(frame.dynamic.dmask == 0):
                     warnings.warn(f"Empty dynamic motion mask for frame {frame.frame_id}")
-            warnings.warn(f"No points created for dynamic frame {frame.frame_id}. Will result in wrong centroid computation.")
+                warnings.warn(f"No points created for dynamic frame {frame.frame_id}. Will result in wrong centroid computation.")
 
-            centroids.append(p.mean())
+            centroids.append(p.mean(axis=0))
         
-        self._dynamic_centroids = np.asarray(centroids)
+        self._dynamic_centroids = np.stack(centroids, axis=0) 
 
-        xyz = np.concatenate(pts, axis=0).astype(np.float32)
-        rgb = np.concatenate(colors, axis=0).astype(np.float32)
+        xyz = np.concatenate(pts[:num_dynamic_frames], axis=0).astype(np.float32)
+        rgb = np.concatenate(colors[:num_dynamic_frames], axis=0).astype(np.float32) / 255.0
 
         self._dynamic_pointcloud = PointCloud(xyz=xyz, rgb=rgb)
         self._dynamic_pointcloud.estimate_normals()
@@ -144,8 +156,37 @@ class SceneProcessor:
         thrs = np.percentile(distances, 100 - percent)
         mask = distances <= thrs
         
-        self._static_pointcloud.apply_mask(mask)
+        self._static_pointcloud.select(mask)
 
-    
+    def downsample_static_pointcloud(self, N: int=250_000):
+        assert self._static_pointcloud is not None, "Static pointcloud has not been created yet."
 
+        num_points = self._static_pointcloud.size
+
+        if N >= num_points:
+            warnings.warn(f"Requested {N} points, but only {num_points} are available. Using all points.")
+            indices = np.arange(num_points)
+        else:
+            indices = np.random.choice(num_points, size=N, replace=False)
+
+        self._static_pointcloud.select(indices)
+
+    def upsample_dynamic_pointcloud(self, factor: float=1.0, noise_std: float=1e-4):
+        ptc = self._dynamic_pointcloud
+
+        target = int(factor * ptc.size)
+        repeat = target // ptc.size
+        remain = target % ptc.size
+
+        xyz = [ptc.xyz] * repeat + [ptc.xyz[:remain]]
+        rgb = [ptc.rgb] * repeat + [ptc.rgb[:remain]]
+
+        xyz = np.concatenate(xyz, axis=0)
+        rgb = np.concatenate(rgb, axis=0)
     
+        xyz += np.random.normal(scale=noise_std, size=xyz.shape)
+        upsampled = PointCloud(xyz=xyz, rgb=rgb)
+        upsampled.estimate_normals()
+        upsampled.normalize_normals()
+
+        self._dynamic_pointcloud = upsampled

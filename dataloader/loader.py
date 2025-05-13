@@ -2,6 +2,7 @@ import imageio.v3 as iio
 import numpy as np
 
 from pathlib import Path
+from tqdm import tqdm
 
 from configs.default_schema import DEFAULT_SCHEMA
 

@@ -99,7 +99,7 @@ def render_sets(dataset: ModelParams, iteration: int, pipeline: PipelineParams):
         model.deform.load_weights(dataset.model_path)
         
         scene = Scene(dataset, model, load_iteration=iteration)
-        views = scene.getDynamicCameras()
+        views = scene.getCameras()
 
         bg_color = [1, 1, 1] if dataset.white_background else [0, 0, 0]
         background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")

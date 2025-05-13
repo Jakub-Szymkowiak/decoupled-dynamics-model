@@ -1,6 +1,7 @@
 import numpy as np
 
 from pathlib import Path
+from typing import NamedTuple
 
 from dataloader.loader import load_scene_data
 from dataloader.scene import SceneProcessor
@@ -41,9 +42,22 @@ def read_and_process(root: str):
     frames, paths = load_scene_data(root)
     processor = SceneProcessor(frames)
     
+    print("1. Aligning poses.")
     processor.align_poses()
-    processor.create_pointclouds()
+
+    print ("2. Creating pointclouds.")
+    processor.create_pointclouds(num_dynamic_frames=4)
+
+    print("3. Trimming distant points.")
     processor.trim_distant_static()
+
+    print("4. Downsampling static pointcloud.")
+    processor.downsample_static_pointcloud()
+
+    print("5. Upsamping dynamic pointcloud.")
+    processor.upsample_dynamic_pointcloud(factor=5.0)
+
+    print("5. Normalizing scene setup.")
     processor.normalize()    
         
     return processor, paths
@@ -54,7 +68,7 @@ def read_cam_info_from_scene(processor: SceneProcessor, frame_id: int):
     num_frames = processor.num_frames
 
     uid = frame_id + 1
-    fid = float(idx / (num_frames - 1))
+    fid = float(frame_id / (num_frames - 1))
 
     # intrinsics
     intrinsics = frame.intrinsics
@@ -75,20 +89,22 @@ def read_cam_info_from_scene(processor: SceneProcessor, frame_id: int):
     
     cam_info = CameraInfo(uid=uid, fid=fid, 
                           R=R, T=T, FovX=FovX, FovY=FovY,
-                          static_image=frame.static.image
-                          static_depth=frame.static.depth
-                          dynamic_image=frame.dynamic.image
-                          dynamic_depth=frame.dynamic.depth
-                          dmask=frame.dynamic.dmask
+                          static_image=frame.static.image,
+                          static_depth=frame.static.depth,
+                          dynamic_image=frame.dynamic.image,
+                          dynamic_depth=frame.dynamic.depth,
+                          dmask=frame.dynamic.dmask,
                           width=width, height=height)
 
     return cam_info
 
 
 def readSceneInfo(path):
+    print("Processing input data.")
     processor, paths = read_and_process(path)
 
-    cam_infos = [read_cam_info_from_scene(processor, idx) for idx range(processor.num_frames)]
+    print("Loading data into Gaussian Splatting pipeline.")
+    cam_infos = [read_cam_info_from_scene(processor, idx) for idx in range(processor.num_frames)]
 
     pointclouds = {
         "static": processor.get_static_pointcloud().to_BasicPointCloud(), 

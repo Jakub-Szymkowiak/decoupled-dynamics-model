@@ -1,6 +1,7 @@
 import sys
 
-from argparse import ArgumentParser
+from argparse import ArgumentParser, Namespace
+from pathlib import Path
 
 import torch
 
@@ -8,6 +9,7 @@ from arguments import ModelParams, OptimizationParams, PipelineParams
 from scene import DecoupledModel, Scene
 from trainer import SceneOptimizer, OptimizationSpec
 from utils.general_utils import safe_state
+from utils.render_utils import get_rendering_func
 
 
 def run_training(model_cfg, opt_cfg, pipe_cfg, args):
@@ -18,18 +20,21 @@ def run_training(model_cfg, opt_cfg, pipe_cfg, args):
     bg_color = [1, 1, 1] if model_cfg.white_background else [0, 0, 0]
     background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
     
-    run_renderer = get_rendering_func(model, pipe, background, model_cfg.is_6dof) 
+    run_renderer = get_rendering_func(model, pipe_cfg, background, model_cfg.is_6dof) 
     
     print("Starting optimization.")
-    spec = OptimizationSpec.from_params(opt_cfg)
+    spec = OptimizationSpec.from_params(model_cfg, opt_cfg, pipe_cfg, args)
     scene_optimizer = SceneOptimizer(spec, scene, model, run_renderer)
     scene_optimizer.start_training()
 
     print("Finished optimization.")
 
+def prepare_output(args):
+    model_path = Path(args.model_path)
+    model_path.mkdir(parents=True, exist_ok=True)
 
-
-
+    cfg_log_path = model_path / "cfg_args"
+    cfg_log_path.write_text(str(Namespace(**vars(args))))
 
 def parse_args():
     parser = ArgumentParser(description="Training script parameters")
@@ -49,8 +54,6 @@ def parse_args():
     parser.add_argument("--test_iterations", nargs="+", type=int, default=default_test_iterations)
     parser.add_argument("--save_iterations", nargs="+", type=int, default=default_save_iterations)
 
-
-
     args = parser.parse_args(sys.argv[1:])
 
     model_cfg = model_params.extract(args)
@@ -61,12 +64,14 @@ def parse_args():
 
     return model_cfg, opt_cfg, pipe_cfg, args
 
-
 if __name__ == "__main__":
     model_cfg, opt_cfg, pipe_cfg, args = parse_args()
 
     safe_state(args.quiet)
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
+
+    prepare_output(args)
+    run_training(model_cfg, opt_cfg, pipe_cfg, args)
 
     
 

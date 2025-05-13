@@ -1,7 +1,7 @@
 import numpy as np
 
-from typing import NamedTuple
-from cams import Intrinsics, Pose
+from typing import NamedTuple, Optional
+from dataloader.cams import Intrinsics, Pose
 
 
 class StaticFrameData(NamedTuple):
@@ -43,12 +43,12 @@ class Frame:
         assert self.dynamic.dmask.shape[:2] == (self.H, self.W), "Dynamic mask shape mismatch"
 
     def get_static_points(self, stride: int=1):
-        return self.to_points(image=self.static.image,
+        return self._to_points(image=self.static.image,
                               depth=self.static.depth,
                               stride=stride)
 
     def get_dynamic_points(self, conf_thrs: float=0.6, stride: int=1):
-        return self.to_points(image=self.dynamic.image,
+        return self._to_points(image=self.dynamic.image,
                               depth=self.dynamic.depth,
                               confs=self.dynamic.confs,
                               dmask=self.dynamic.dmask,

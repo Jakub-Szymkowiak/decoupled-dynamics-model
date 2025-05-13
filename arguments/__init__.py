@@ -79,7 +79,6 @@ class PipelineParams(ParamGroup):
 class OptimizationParams(ParamGroup):
     def __init__(self, parser):
         self.iterations = 40_000
-        self.warm_up = 1000
         self.position_lr_init = 0.00016
         self.position_lr_final = 0.0000016
         self.position_lr_delay_mult = 0.01
@@ -96,7 +95,7 @@ class OptimizationParams(ParamGroup):
         self.densify_from_iter = 500
         self.densify_until_iter = 15_000
         self.densify_grad_threshold = 0.0007
-
+        
         self.lambda_static = 1.0
         self.lambda_dynamic = 10.0
         self.lambda_composed = 1.0

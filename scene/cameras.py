@@ -16,7 +16,7 @@ from utils.graphics_utils import getWorld2View2, getProjectionMatrix
 
 
 class Camera(nn.Module):
-    def __init__(self, colmap_id, fid
+    def __init__(self, uid, fid,
                  R, T, FoVx, FoVy, 
                  static_image, static_depth,
                  dynamic_image, dynamic_depth, dmask,  
@@ -43,13 +43,13 @@ class Camera(nn.Module):
         
         self.fid = torch.tensor(fid).to(self.data_device)
 
-        self.image_width = self.original_image.shape[2]
-        self.image_height = self.original_image.shape[1]
+        self.image_width = self.static_image.shape[2]
+        self.image_height = self.static_image.shape[1]
 
-        self.static_depth = torch.tensor(static_depth).to(self.data_device)
-        self.dynamic_depth = torch.tensor(dynamic_depth).to(self.data_device)
+        self.static_depth = static_depth.to(self.data_device)
+        self.dynamic_depth = dynamic_depth.to(self.data_device)
 
-        self.dmask = torch.tensor(dmask).unsqueeze(0).to(device)
+        self.dmask = torch.tensor(dmask).unsqueeze(0).to(self.data_device)
 
         self.zfar = 100.0
         self.znear = 0.01
@@ -58,11 +58,11 @@ class Camera(nn.Module):
         self.scale = scale
 
         world_view_transform = torch.tensor(getWorld2View2(R, T, trans, scale))
-        self.world_view_transform = self.world_view_transform.transpose(0, 1).to(self.data_device)
+        self.world_view_transform = world_view_transform.transpose(0, 1).to(self.data_device)
 
         projection_matrix = getProjectionMatrix(znear=self.znear, zfar=self.zfar, 
                                                 fovX=self.FoVx, fovY=self.FoVy)                                          
-        self.projection_matrix = self.projection_matrix.transpose(0,1).to(self.data_device)
+        self.projection_matrix = projection_matrix.transpose(0,1).to(self.data_device)
 
         self.full_proj_transform = (self.world_view_transform.unsqueeze(0).bmm(self.projection_matrix.unsqueeze(0))).squeeze(0)
         self.camera_center = self.world_view_transform.inverse()[3, :3]
