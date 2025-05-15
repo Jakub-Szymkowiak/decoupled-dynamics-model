@@ -35,7 +35,6 @@ class CameraInfo(NamedTuple):
 class SceneInfo(NamedTuple):
     cam_infos: list
     pointclouds: dict
-    centroids: list
 
 
 def read_and_process(root: str):
@@ -111,11 +110,8 @@ def readSceneInfo(path):
         "dynamic": processor.get_dynamic_pointcloud().to_BasicPointCloud()
     }
 
-    centroids = processor.get_dynamic_centroids()
-
     scene_info = SceneInfo(cam_infos=cam_infos,
-                           pointclouds=pointclouds,
-                           centroids=centroids)
+                           pointclouds=pointclouds)
 
     return scene_info
 

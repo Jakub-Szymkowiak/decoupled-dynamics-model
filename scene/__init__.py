@@ -50,8 +50,7 @@ class Scene:
         else:
             self.model.create_from_pcd(scene_info.pointclouds["static"], 
                                       scene_info.pointclouds["dynamic"], 
-                                      self.cameras_extent,
-                                      scene_info.centroids)
+                                      self.cameras_extent)
 
         self.cameras = {}
         for resolution_scale in resolution_scales:

@@ -29,8 +29,6 @@ class Frame:
         self.dynamic = dynamic_data
         self.pose = pose
         self.intrinsics = intrinsics
-        
-        self.centroid = None
 
         self.H, self.W = self.static.image.shape[:2]
 

@@ -58,7 +58,6 @@ class SceneProcessor:
 
         self._static_pointcloud = None
         self._dynamic_pointcloud = None
-        self._dynamic_centroids = None
 
     @property
     def num_frames(self):
@@ -73,9 +72,6 @@ class SceneProcessor:
  
     def get_dynamic_pointcloud(self):
         return self._dynamic_pointcloud
-
-    def get_dynamic_centroids(self):
-        return self._dynamic_centroids
 
     def get_frame(self, frame_id):
         return self._frames[frame_id]
@@ -93,7 +89,6 @@ class SceneProcessor:
     def create_pointclouds(self, downsample: int=1, conf_thrs: float=0.6, num_dynamic_frames: Optional[int]=None):
         if num_dynamic_frames is not None:
             if num_dynamic_frames > self.num_frames:
-                warnings.warn(...)
                 num_dynamic_frames = self.num_frames
         else:
             num_dynamic_frames = self.num_frames
@@ -116,21 +111,12 @@ class SceneProcessor:
         self._static_pointcloud.estimate_normals()
 
         # dynamic pointcloud
-        pts, colors, centroids = [], [], []
+        pts, colors = [], []
         for frame in self._frames:
             p, c = frame.get_dynamic_points(stride=downsample)
             pts.append(p)
             colors.append(c)
             
-            if p.size == 0:
-                if np.all(frame.dynamic.dmask == 0):
-                    warnings.warn(f"Empty dynamic motion mask for frame {frame.frame_id}")
-                warnings.warn(f"No points created for dynamic frame {frame.frame_id}. Will result in wrong centroid computation.")
-
-            centroids.append(p.mean(axis=0))
-        
-        self._dynamic_centroids = np.stack(centroids, axis=0) 
-
         xyz = np.concatenate(pts[:num_dynamic_frames], axis=0).astype(np.float32)
         rgb = np.concatenate(colors[:num_dynamic_frames], axis=0).astype(np.float32) / 255.0
 
@@ -143,7 +129,6 @@ class SceneProcessor:
 
         scale = radius / np.max(np.linalg.norm(base - center, axis=1))
 
-        self._dynamic_centroids = (self._dynamic_centroids - center) * scale
         self._static_pointcloud.rescale(scale=scale, translation=center)
         self._dynamic_pointcloud.rescale(scale=scale, translation=center)
 

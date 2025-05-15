@@ -49,7 +49,7 @@ class Camera(nn.Module):
         self.static_depth = static_depth.to(self.data_device)
         self.dynamic_depth = dynamic_depth.to(self.data_device)
 
-        self.dmask = torch.tensor(dmask).unsqueeze(0).to(self.data_device)
+        self.dmask = dmask.unsqueeze(0).to(self.data_device)
 
         self.zfar = 100.0
         self.znear = 0.01
