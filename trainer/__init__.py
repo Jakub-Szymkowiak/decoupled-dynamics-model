@@ -95,12 +95,14 @@ class SceneOptimizer:
         for iteration in range(1, self.spec.iterations + 1):
             state.iter_start.record()
 
+            # Every 1k iterations increase SH degree until max
             if iteration % 1000 == 0:
                 self.model.oneupSHdegree()
 
             if not state.viewpoint_stack:
                 state.viewpoint_stack = self.scene.getCameras().copy()
 
+            # Draw random camera
             random_index = randint(0, self.scene.num_frames - 1)
             viewpoint = state.viewpoint_stack[random_index]
             fid = viewpoint.fid
@@ -108,14 +110,19 @@ class SceneOptimizer:
             if self.spec.load2gpu_on_the_fly:
                 viewpoint.load2device()
 
+            # Get training directive from scheduler
             directive = self.scheduler.directive_for(iteration)
             loss_dict = {}
 
+            # Handle deform network
             if directive.train_deform:
                 deltas = self.model.infer_deltas(fid, iteration, state.time_interval, self.smooth_term)
+                deform_reg_loss, _  = self.reg_registry.compute(self.model, deltas["dynamic"], target="deform")
             else: 
                 deltas = self.model.get_zero_deltas()
+                deform_reg_loss = 0.0
 
+            # Render images 
             losses, renders = {}, {}
 
             if directive.train_static:
@@ -125,30 +132,35 @@ class SceneOptimizer:
             if directive.train_static and directive.train_dynamic:
                 losses["composed"], renders["composed"], _ = self._render_and_compute_loss("composed", deltas, viewpoint)
 
+            # Regularize 
+            gaussians_reg_loss, _ =  self.reg_registry.compute(self.model, deltas["dynamic"], target="gaussians")
+            
             loss = sum(losses[_]["total"] for _ in losses)
-
-            reg_loss, _ =  self.reg_registry.compute(self.model, deltas)
-            loss += reg_loss
-
-            # DEBUG - save gts and renders
-
-            # from torchvision.utils import save_image
-            # save_image(viewpoint.static_image, "gt_static.png")
-            # save_image(viewpoint.dynamic_image, "gt_dynamic.png")
-
-            # if directive.train_static:
-            #     save_image(renders["static"]["render"], "static.png")
-            # if directive.train_dynamic:
-            #     save_image(renders["dynamic"]["render"], "dynamic.png")
-            # if directive.train_static and directive.train_dynamic:
-            #     save_image(renders["composed"]["render"], "compsoed.png")
-
+            loss += gaussians_reg_loss + deform_reg_loss
             loss.backward()
 
             if self.spec.load2gpu_on_the_fly:
                 viewpoint.load2device("cpu")
 
             state.iter_end.record()
+
+
+            ### DEBUG - save gts and renders
+
+            if False:
+                with torch.no_grad():
+                    from torchvision.utils import save_image
+                    save_image(viewpoint.static_image, "gt_static.png")
+                    save_image(viewpoint.dynamic_image, "gt_dynamic.png")
+
+                    if directive.train_static:
+                        save_image(renders["static"]["render"], "static.png")
+                    if directive.train_dynamic:
+                        save_image(renders["dynamic"]["render"], "dynamic.png")
+                    if directive.train_static and directive.train_dynamic:
+                        save_image(renders["composed"]["render"], "compsoed.png")
+
+            ### END DEBUG
 
             with torch.no_grad():
                 self._update_progress_bar(iteration, loss.item(), state)

@@ -60,7 +60,7 @@ class GaussianModel:
 
     @property
     def get_scaling(self):
-        return self.scaling_activation(self._scaling).expand(-1, 3)
+        return self.scaling_activation(self._scaling)
 
     @property
     def get_rotation(self):
@@ -104,7 +104,7 @@ class GaussianModel:
         features[:, 3:, 1:] = 0.0
 
         dist2 = torch.clamp_min(distCUDA2(torch.from_numpy(np.asarray(pcd.points)).float().cuda()), 0.0000001)
-        scales = torch.log(torch.sqrt(dist2))[..., None]
+        scales = torch.log(torch.sqrt(dist2))[..., None].repeat(1, 3)
 
         rots = torch.zeros((fused_point_cloud.shape[0], 4), device="cuda")
         rots[:, 0] = 1
