@@ -10,14 +10,14 @@ class Regularizer:
         self.name = name or fn.__name__
 
     def __call__(self, model):
-        return self.fn(model) * self.weight
+        return self.fn(model, deltas) * self.weight
 
 class RegularizerRegistry:
     def __init__(self, regularizers: List[Regularizer], device="cuda"):
         self._regs = regularizers
         self._device = device
 
-    def compute(self, model):
+    def compute(self, model, deltas):
         loss_terms = {}
         for reg in self._regs:
             value = reg(model)

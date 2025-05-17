@@ -1,16 +1,18 @@
 #!/bin/bash
 
 SCENE_NAME="$1"
-shift
+ID="$2"
 
 if [ -z "$SCENE_NAME" ]; then
-    echo "Usage: $0 <scene-name> [additional train.py arguments]"
+    echo "Usage: $0 <scene-name> <id> [additional train.py arguments]"
     exit 1
 fi
 
-SCENE_ROOT="/home/computergraphics/Documents/jszymkowiak/project/decoupled-dynamics-model/data"
+shift 2
+
+SCENE_ROOT="./data"
 SCENE_PATH="${SCENE_ROOT}/${SCENE_NAME}"
-OUTPUT_DIR="./output/${SCENE_NAME}/_001"
+OUTPUT_DIR="./output/${SCENE_NAME}/_${ID}"
 
 mkdir -p "${OUTPUT_DIR}"
 

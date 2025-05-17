@@ -23,6 +23,7 @@ def run_training(model_cfg, opt_cfg, pipe_cfg, args):
     run_renderer = get_rendering_func(model, pipe_cfg, background, model_cfg.is_6dof) 
     
     print("Starting optimization.")
+    
     spec = OptimizationSpec.from_params(model_cfg, opt_cfg, pipe_cfg, args)
     scene_optimizer = SceneOptimizer(spec, scene, model, run_renderer)
     scene_optimizer.start_training()
@@ -47,7 +48,7 @@ def parse_args():
     parser.add_argument("--quiet", action="store_true")
 
     test_interval = 2500
-    max_iters = 40_000
+    max_iters = 100_000
     default_test_iterations = list(range(test_interval, max_iters, test_interval))
     default_save_iterations = [1, 5000, 10000, 15000, 30000]
 

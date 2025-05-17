@@ -127,7 +127,7 @@ class SceneOptimizer:
 
             loss = sum(losses[_]["total"] for _ in losses)
 
-            reg_loss, _ =  self.reg_registry.compute(self.model)
+            reg_loss, _ =  self.reg_registry.compute(self.model, deltas)
             loss += reg_loss
 
             # DEBUG - save gts and renders

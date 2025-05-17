@@ -7,5 +7,5 @@ def anisotropic_scale_penalty(model):
 
 
 DEFAULT_REGULARIZERS = [
-    Regularizer(anisotropic_scale_penalty, weight=5.0)
+    #Regularizer(anisotropic_scale_penalty, weight=5.0)
 ]

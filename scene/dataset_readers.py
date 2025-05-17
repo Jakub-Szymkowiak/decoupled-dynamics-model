@@ -29,8 +29,7 @@ class CameraInfo(NamedTuple):
 
     width: int
     height: int
-
-
+    
 
 class SceneInfo(NamedTuple):
     cam_infos: list
@@ -45,7 +44,7 @@ def read_and_process(root: str):
     processor.align_poses()
 
     print ("2. Creating pointclouds.")
-    processor.create_pointclouds(num_dynamic_frames=4)
+    processor.create_pointclouds(num_dynamic_frames=6)
 
     print("3. Trimming distant points.")
     processor.trim_distant_static()
@@ -54,9 +53,9 @@ def read_and_process(root: str):
     processor.downsample_static_pointcloud()
 
     print("5. Upsamping dynamic pointcloud.")
-    processor.upsample_dynamic_pointcloud(factor=5.0)
+    processor.upsample_dynamic_pointcloud(factor=1.0)
 
-    print("5. Normalizing scene setup.")
+    print("6. Normalizing scene setup.")
     processor.normalize()    
         
     return processor, paths

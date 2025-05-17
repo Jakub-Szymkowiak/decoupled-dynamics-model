@@ -28,19 +28,15 @@ class Deltas:
 
     @classmethod
     def zeros(cls, Ns: int, device="cuda"):
-        return cls(
-            d_xyz=torch.zeros(Ns, 3, device=device),
-            d_rotation=torch.zeros(Ns, 4, device=device),
-            d_scaling=torch.zeros(Ns, 3, device=device)
-        )
+        return cls(d_xyz=torch.zeros(Ns, 3, device=device),
+                   d_rotation=torch.zeros(Ns, 4, device=device),
+                   d_scaling=torch.zeros(Ns, 3, device=device))
 
     @classmethod
     def cat(cls, a: "Deltas", b: "Deltas") -> "Deltas":
-        return cls(
-            d_xyz=torch.cat([a.d_xyz, b.d_xyz], dim=0),
-            d_rotation=torch.cat([a.d_rotation, b.d_rotation], dim=0),
-            d_scaling=torch.cat([a.d_scaling, b.d_scaling], dim=0),
-        )
+        return cls(d_xyz=torch.cat([a.d_xyz, b.d_xyz], dim=0),
+                   d_rotation=torch.cat([a.d_rotation, b.d_rotation], dim=0),
+                   d_scaling=torch.cat([a.d_scaling, b.d_scaling], dim=0))
 
     def to_tuple(self):
         return (self.d_xyz, self.d_rotation, self.d_scaling)
@@ -53,12 +49,7 @@ class Deltas:
 class DecoupledModel:
     _static_deltas = Deltas.from_tuple((0.0, 0.0, 0.0))
 
-    def __init__(
-            self, 
-            sh_degree: int,
-            is_blender: bool=False,
-            is_6dof: bool=False
-        ):
+    def __init__(self, sh_degree: int, is_blender: bool=False, is_6dof: bool=False):
 
         self.static = GaussianModel(sh_degree)
         self.dynamic = GaussianModel(sh_degree)
@@ -67,7 +58,6 @@ class DecoupledModel:
         self.active_sh_degree = 0
         self.max_sh_degree = sh_degree
         
-        # Set in self.create_from_pcd()
         self._Ns = None
         self._Nd = None
 
@@ -90,8 +80,6 @@ class DecoupledModel:
             smooth_term: Optional[torch.tensor] = None,
             noise: bool=True
         ) -> Dict[Literal["static", "dynamic", "composed"], Deltas]:
-
-        # TODO - decide whether to use buffering
 
         # Noise computation
         if noise:

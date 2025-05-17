@@ -60,7 +60,7 @@ class GaussianModel:
 
     @property
     def get_scaling(self):
-        return self.scaling_activation(self._scaling)
+        return self.scaling_activation(self._scaling).expand(-1, 3)
 
     @property
     def get_rotation(self):
@@ -88,11 +88,15 @@ class GaussianModel:
             self.active_sh_degree += 1
 
     def turn_off_gradients(self):
-        self._features_dc.requires_grad_(False) 
-        self._features_rest.requires_grad_(False) 
+        #self._features_dc.requires_grad_(False) 
+        #self._features_rest.requires_grad_(False)
+
+        self._rotation.requires_grad_(False)
+        return 
 
     def create_from_pcd(self, pcd: BasicPointCloud, spatial_lr_scale: float):
-        self.spatial_lr_scale = 5
+        self.spatial_lr_scale = spatial_lr_scale
+
         fused_point_cloud = torch.tensor(np.asarray(pcd.points)).float().cuda()
         fused_color = RGB2SH(torch.tensor(np.asarray(pcd.colors)).float().cuda())
         features = torch.zeros((fused_color.shape[0], 3, (self.max_sh_degree + 1) ** 2)).float().cuda()
@@ -100,7 +104,8 @@ class GaussianModel:
         features[:, 3:, 1:] = 0.0
 
         dist2 = torch.clamp_min(distCUDA2(torch.from_numpy(np.asarray(pcd.points)).float().cuda()), 0.0000001)
-        scales = torch.log(torch.sqrt(dist2))[..., None].repeat(1, 3)
+        scales = torch.log(torch.sqrt(dist2))[..., None]
+
         rots = torch.zeros((fused_point_cloud.shape[0], 4), device="cuda")
         rots[:, 0] = 1
 
@@ -120,8 +125,6 @@ class GaussianModel:
         self.percent_dense = training_args.percent_dense
         self.xyz_gradient_accum = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
         self.denom = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
-
-        self.spatial_lr_scale = 5
 
         l = [
             {'params': [self._xyz], 'lr': training_args.position_lr_init * self.spatial_lr_scale, "name": "xyz"},
