@@ -4,7 +4,7 @@ DEFAULT_OPTIMIZATION_STAGES = [
     OptimizationStage(
         name="init",
         start=0,
-        end=2500,
+        end=500,
         directive=OptimizationDirective(
             stage_id=0,
             train_deform=False,
@@ -14,8 +14,8 @@ DEFAULT_OPTIMIZATION_STAGES = [
     ),
     OptimizationStage(
         name="dynamic",
-        start=2500,
-        end=10000,
+        start=500,
+        end=5000,
         directive=OptimizationDirective(
             stage_id=1,
             train_deform=True,
@@ -25,7 +25,7 @@ DEFAULT_OPTIMIZATION_STAGES = [
     ),
     OptimizationStage(
         name="full",
-        start=10000,
+        start=5000,
         end=40000,
         directive=OptimizationDirective(
             stage_id=2,

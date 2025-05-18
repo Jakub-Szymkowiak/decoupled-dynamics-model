@@ -1,18 +1,24 @@
+from dataclasses import dataclass
+from typing import Optional
+
 import numpy as np
 
-from typing import NamedTuple, Optional
 from dataloader.cams import Intrinsics, Pose
 
 
-class StaticFrameData(NamedTuple):
+@dataclass
+class StaticFrameData:
     image: np.ndarray
     depth: np.ndarray
 
-class DynamicFrameData(NamedTuple):
+
+@dataclass
+class DynamicFrameData:
     image: np.ndarray
     depth: np.ndarray
     confs: np.ndarray
     dmask: np.ndarray
+
 
 class Frame:
     def __init__(
@@ -42,16 +48,16 @@ class Frame:
 
     def get_static_points(self, stride: int=1):
         return self._to_points(image=self.static.image,
-                              depth=self.static.depth,
-                              stride=stride)
+                               depth=self.static.depth,
+                               stride=stride)
 
     def get_dynamic_points(self, conf_thrs: float=0.6, stride: int=1):
         return self._to_points(image=self.dynamic.image,
-                              depth=self.dynamic.depth,
-                              confs=self.dynamic.confs,
-                              dmask=self.dynamic.dmask,
-                              stride=stride,
-                              conf_thrs=conf_thrs)
+                               depth=self.dynamic.depth,
+                               confs=self.dynamic.confs,
+                               dmask=self.dynamic.dmask,
+                               stride=stride,
+                               conf_thrs=0.0)
 
     def _to_points(self, 
                    image: np.ndarray,

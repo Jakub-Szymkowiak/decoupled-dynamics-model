@@ -19,7 +19,8 @@ class Camera(nn.Module):
     def __init__(self, uid, fid,
                  R, T, FoVx, FoVy, 
                  static_image, static_depth,
-                 dynamic_image, dynamic_depth, dmask,  
+                 dynamic_image, dynamic_depth, dmask,
+                 pose, intrinsics,
                  trans=np.array([0.0, 0.0, 0.0]), 
                  scale=1.0, data_device="cuda"):
 
@@ -30,6 +31,8 @@ class Camera(nn.Module):
         self.T = T
         self.FoVx = FoVx
         self.FoVy = FoVy
+        self.pose = pose
+        self.intrinsics = intrinsics
 
         try:
             self.data_device = torch.device(data_device)

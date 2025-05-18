@@ -42,7 +42,8 @@ def loadCam(args, cam_info, resolution_scale):
                   R=cam_info.R, T=cam_info.T, FoVx=cam_info.FovX, FoVy=cam_info.FovY,
                   static_image=static_image, static_depth=static_depth,
                   dynamic_image=dynamic_image, dynamic_depth=dynamic_depth, dmask=dmask,
-                  data_device=args.data_device if not args.load2gpu_on_the_fly else "cpu")
+                  data_device=args.data_device if not args.load2gpu_on_the_fly else "cpu",
+                  pose=cam_info.pose, intrinsics=cam_info.intrinsics)
 
 
 def cameraList_from_camInfos(cam_infos, resolution_scale, args):

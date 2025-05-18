@@ -3,6 +3,7 @@ import numpy as np
 from pathlib import Path
 from typing import NamedTuple
 
+from dataloader.cams import Intrinsics, Pose
 from dataloader.loader import load_scene_data
 from dataloader.scene import SceneProcessor
 
@@ -29,6 +30,9 @@ class CameraInfo(NamedTuple):
 
     width: int
     height: int
+
+    intrinsics: Intrinsics
+    pose: Pose
     
 
 class SceneInfo(NamedTuple):
@@ -44,16 +48,16 @@ def read_and_process(root: str):
     processor.align_poses()
 
     print ("2. Creating pointclouds.")
-    processor.create_pointclouds(num_dynamic_frames=6)
+    processor.create_pointclouds(num_dynamic_frames=1)
 
     print("3. Trimming distant points.")
     processor.trim_distant_static()
 
     print("4. Downsampling static pointcloud.")
-    processor.downsample_static_pointcloud()
+    processor.downsample_static_pointcloud(N=300_000)
 
     print("5. Upsamping dynamic pointcloud.")
-    processor.upsample_dynamic_pointcloud(factor=1.0)
+    processor.upsample_dynamic_pointcloud(factor=25.0)
 
     print("6. Normalizing scene setup.")
     processor.normalize()    
@@ -92,7 +96,8 @@ def read_cam_info_from_scene(processor: SceneProcessor, frame_id: int):
                           dynamic_image=frame.dynamic.image,
                           dynamic_depth=frame.dynamic.depth,
                           dmask=frame.dynamic.dmask,
-                          width=width, height=height)
+                          width=width, height=height,
+                          pose=pose, intrinsics=intrinsics)
 
     return cam_info
 

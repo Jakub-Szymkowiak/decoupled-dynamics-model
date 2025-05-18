@@ -88,11 +88,8 @@ class GaussianModel:
             self.active_sh_degree += 1
 
     def turn_off_gradients(self):
-        #self._features_dc.requires_grad_(False) 
-        #self._features_rest.requires_grad_(False)
-
-        self._rotation.requires_grad_(False)
-        return 
+        self._features_dc.requires_grad_(False) 
+        self._features_rest.requires_grad_(False)
 
     def create_from_pcd(self, pcd: BasicPointCloud, spatial_lr_scale: float):
         self.spatial_lr_scale = spatial_lr_scale

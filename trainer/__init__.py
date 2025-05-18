@@ -117,12 +117,10 @@ class SceneOptimizer:
             # Handle deform network
             if directive.train_deform:
                 deltas = self.model.infer_deltas(fid, iteration, state.time_interval, self.smooth_term)
-                deform_reg_loss, _  = self.reg_registry.compute(self.model, deltas["dynamic"], target="deform")
             else: 
                 deltas = self.model.get_zero_deltas()
-                deform_reg_loss = 0.0
 
-            # Render images 
+            # Render images and compute photometric losses
             losses, renders = {}, {}
 
             if directive.train_static:
@@ -132,11 +130,27 @@ class SceneOptimizer:
             if directive.train_static and directive.train_dynamic:
                 losses["composed"], renders["composed"], _ = self._render_and_compute_loss("composed", deltas, viewpoint)
 
-            # Regularize 
-            gaussians_reg_loss, _ =  self.reg_registry.compute(self.model, deltas["dynamic"], target="gaussians")
-            
             loss = sum(losses[_]["total"] for _ in losses)
-            loss += gaussians_reg_loss + deform_reg_loss
+
+            # Regularize 
+            reg_loss, _ = self.reg_registry.compute(
+                model=self.model,
+                deltas=deltas["dynamic"],
+                render=renders,
+                viewpoint=viewpoint,
+                directive=directive
+            )
+
+            # DEBUG
+            if iteration % 100 == 0:
+                print(f"[DEBUG] Iter {iteration:05d} | Viewpoint FID {fid} | Losses:")
+                for k, val in losses.items():
+                    print(f"  - {k:<8}: total={val['total']:.4f}, l1={val['l1']:.4f}, ssim={val['ssim']:.4f}")
+                print(f"  -> Reg Loss: {reg_loss.item():.4f} | Total Loss: {loss.item():.4f}")
+
+
+            loss += reg_loss
+
             loss.backward()
 
             if self.spec.load2gpu_on_the_fly:

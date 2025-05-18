@@ -123,7 +123,7 @@ class SceneProcessor:
         self._dynamic_pointcloud = PointCloud(xyz=xyz, rgb=rgb)
         self._dynamic_pointcloud.estimate_normals()
 
-    def normalize(self, radius: float=0.05):
+    def normalize(self, radius: float=1.0):
         base = np.array([f.pose.T for f in self._frames])
         center = base.mean(axis=0)
 
@@ -134,6 +134,8 @@ class SceneProcessor:
 
         for frame in self._frames:
             frame.pose = frame.pose.rescaled(scale=scale, translation=center)
+            frame.static.depth *= scale
+            frame.dynamic.depth *= scale
 
     def trim_distant_static(self, percent: float=10.0):
         xyz = self._static_pointcloud.xyz
