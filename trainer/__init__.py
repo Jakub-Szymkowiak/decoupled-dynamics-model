@@ -2,13 +2,13 @@ import sys
 
 from random import randint
 from types import SimpleNamespace as State
-from typing import Callable, List, NamedTuple
+from typing import Callable, Dict, List, NamedTuple
 
 import torch
 
 from tqdm import tqdm
 
-from configs.default_schedule import DEFAULT_OPTIMIZATION_STAGES
+from configs.default_schedule import DEFAULT_STAGES
 from configs.default_regularizers import DEFAULT_REGULARIZERS
 
 from scene import DecoupledModel, Scene
@@ -29,9 +29,7 @@ class OptimizationSpec(NamedTuple):
     iterations: int
 
     lambda_dssim: float
-    lambda_static: float
-    lambda_dynamic: float
-    lambda_composed: float
+    lambdas_decoupled: Dict[str, float]
     
     load2gpu_on_the_fly: bool
 
@@ -44,13 +42,13 @@ class OptimizationSpec(NamedTuple):
     def from_params(cls, model_cfg, opt_cfg, pipe_cfg, args):
         return cls(iterations          = opt_cfg.iterations,
                    lambda_dssim        = opt_cfg.lambda_dssim,
-                   lambda_static       = opt_cfg.lambda_static,
-                   lambda_dynamic      = opt_cfg.lambda_dynamic,
-                   lambda_composed     = opt_cfg.lambda_composed,
                    load2gpu_on_the_fly = model_cfg.load2gpu_on_the_fly,
                    white_background    = model_cfg.white_background,
                    test_iterations     = args.test_iterations,
-                   save_iterations     = args.save_iterations)
+                   save_iterations     = args.save_iterations,
+                   lambdas_decoupled = {"static": opt_cfg.lambda_static,
+                                        "dynamic": opt_cfg.lambda_dynamic,
+                                        "composed": opt_cfg.lambda_composed})
 
 
 class SceneOptimizer:
@@ -70,7 +68,7 @@ class SceneOptimizer:
         self.bg_color = [1, 1, 1] if self.spec.white_background else [0, 0, 0]
 
         self.reg_registry = RegularizerRegistry(DEFAULT_REGULARIZERS)
-        self.scheduler = OptimizationStageScheduler(DEFAULT_OPTIMIZATION_STAGES)
+        self.scheduler = OptimizationStageScheduler(DEFAULT_STAGES)
         self.smooth_term = get_linear_noise_func(lr_init=0.1, 
                                                  lr_final=1e-15, 
                                                  lr_delay_mult=0.01, 
@@ -138,15 +136,17 @@ class SceneOptimizer:
                 deltas=deltas["dynamic"],
                 render=renders,
                 viewpoint=viewpoint,
-                directive=directive
+                directive=directive,
+                cokolwiek=2
             )
 
             # DEBUG
-            if iteration % 100 == 0:
-                print(f"[DEBUG] Iter {iteration:05d} | Viewpoint FID {fid} | Losses:")
-                for k, val in losses.items():
-                    print(f"  - {k:<8}: total={val['total']:.4f}, l1={val['l1']:.4f}, ssim={val['ssim']:.4f}")
-                print(f"  -> Reg Loss: {reg_loss.item():.4f} | Total Loss: {loss.item():.4f}")
+            if False:
+                if iteration % 100 == 0:
+                    print(f"[DEBUG] Iter {iteration:05d} | Viewpoint FID {fid} | Losses:")
+                    for k, val in losses.items():
+                        print(f"  - {k:<8}: total={val['total']:.4f}, l1={val['l1']:.4f}, ssim={val['ssim']:.4f}")
+                    print(f"  -> Reg Loss: {reg_loss.item():.4f} | Total Loss: {loss.item():.4f}")
 
 
             loss += reg_loss
@@ -211,13 +211,14 @@ class SceneOptimizer:
         gt_image = viewpoint.static_image if mode == "static" else viewpoint.dynamic_image
         
         if mode == "dynamic":
-            rendered_image = mask_image(rendered_image, viewpoint.dmask)
+            #rendered_image = mask_image(rendered_image, viewpoint.dmask)
             gt_image = mask_image(gt_image, viewpoint.dmask)
 
         l1_val = l1_loss(rendered_image, gt_image)
         ssim_val = ssim(rendered_image, gt_image)
 
         total_loss = (1.0 - self.spec.lambda_dssim) * l1_val + self.spec.lambda_dssim * (1.0 - ssim_val)
+        total_loss *= self.spec.lambdas_decoupled[mode]
 
         losses = {"total": total_loss, "l1": l1_val, "ssim": ssim_val}
 

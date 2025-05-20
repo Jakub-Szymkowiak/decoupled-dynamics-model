@@ -123,7 +123,7 @@ class SceneProcessor:
         self._dynamic_pointcloud = PointCloud(xyz=xyz, rgb=rgb)
         self._dynamic_pointcloud.estimate_normals()
 
-    def normalize(self, radius: float=1.0):
+    def normalize(self, radius: float=0.5):
         base = np.array([f.pose.T for f in self._frames])
         center = base.mean(axis=0)
 
@@ -137,13 +137,16 @@ class SceneProcessor:
             frame.static.depth *= scale
             frame.dynamic.depth *= scale
 
-    def trim_distant_static(self, percent: float=10.0):
-        xyz = self._static_pointcloud.xyz
-        distances = np.linalg.norm(xyz, axis=1)
-        thrs = np.percentile(distances, 100 - percent)
-        mask = distances <= thrs
-        
-        self._static_pointcloud.select(mask)
+    def trim_distant(self, percent_static: float=10.0, percent_dynamic: float=10.0):
+        def trim(ptc, percent):
+            xyz = ptc.xyz
+            distances = np.linalg.norm(xyz, axis=1)
+            thrs = np.percentile(distances, 100 - percent)
+            mask = distances <= thrs
+            ptc.select(mask)
+
+        trim(self._static_pointcloud, percent_static)
+        trim(self._dynamic_pointcloud, percent_dynamic)
 
     def downsample_static_pointcloud(self, N: int=250_000):
         assert self._static_pointcloud is not None, "Static pointcloud has not been created yet."

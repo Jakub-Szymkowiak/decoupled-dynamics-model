@@ -34,7 +34,7 @@ class Scene:
         self.num_frames = len(scene_info. cam_infos)
 
         # TODO
-        self.cameras_extent = 0.05 
+        self.cameras_extent = 5 
 
         # TODO - implement loading logic for rendering
         if load_iteration:
@@ -63,3 +63,6 @@ class Scene:
 
     def getCameras(self, scale=1.0):
         return self.cameras[scale]
+
+    def getCam(self, idx scale=1.0):
+        return self.getCameras(scale=scale)[idx]

@@ -51,13 +51,13 @@ def read_and_process(root: str):
     processor.create_pointclouds(num_dynamic_frames=1)
 
     print("3. Trimming distant points.")
-    processor.trim_distant_static()
+    processor.trim_distant()
 
     print("4. Downsampling static pointcloud.")
-    processor.downsample_static_pointcloud(N=300_000)
+    processor.downsample_static_pointcloud(N=100_000)
 
     print("5. Upsamping dynamic pointcloud.")
-    processor.upsample_dynamic_pointcloud(factor=25.0)
+    processor.upsample_dynamic_pointcloud(factor=5.0)
 
     print("6. Normalizing scene setup.")
     processor.normalize()    

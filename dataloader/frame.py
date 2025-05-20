@@ -54,10 +54,9 @@ class Frame:
     def get_dynamic_points(self, conf_thrs: float=0.6, stride: int=1):
         return self._to_points(image=self.dynamic.image,
                                depth=self.dynamic.depth,
-                               confs=self.dynamic.confs,
+                               #confs=self.dynamic.confs,
                                dmask=self.dynamic.dmask,
-                               stride=stride,
-                               conf_thrs=0.0)
+                               stride=stride)
 
     def _to_points(self, 
                    image: np.ndarray,

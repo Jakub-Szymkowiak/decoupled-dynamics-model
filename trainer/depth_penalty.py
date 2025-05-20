@@ -1,8 +1,8 @@
 import torch
 
 
-def dynamic_depth_alignment_penalty(model, deltas, viewpoint):
-    if deltas is None or viewpoint.uid != 1:
+def dynamic_depth_alignment_penalty(model, deltas, viewpoint, directive):
+    if not directive.train_deform or viewpoint.uid != 1:
         return 0.0
 
     xyz = model.dynamic.get_xyz + deltas.d_xyz
@@ -36,7 +36,10 @@ def dynamic_depth_alignment_penalty(model, deltas, viewpoint):
     return torch.abs(gt_depth[idx_flat[valid]] - depth[valid]).mean()
 
 
-def static_depth_alignment_penalty(model, viewpoint):
+def static_depth_alignment_penalty(model, viewpoint, directive):
+    if not directive.train_static:
+        return 0.0
+
     xyz = model.static.get_xyz
     P = torch.tensor(viewpoint.pose.inverse.homogeneous, device=xyz.device, dtype=xyz.dtype)
     K = torch.tensor(viewpoint.intrinsics.K, device=xyz.device, dtype=xyz.dtype)
