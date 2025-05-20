@@ -27,7 +27,8 @@ class Frame:
             static_data: StaticFrameData,
             dynamic_data: DynamicFrameData,
             pose: Pose,
-            intrinsics: Intrinsics
+            intrinsics: Intrinsics,
+            flow: np.ndarray
         ):
 
         self.frame_id = frame_id
@@ -35,6 +36,7 @@ class Frame:
         self.dynamic = dynamic_data
         self.pose = pose
         self.intrinsics = intrinsics
+        self.flow = flow
 
         self.H, self.W = self.static.image.shape[:2]
 
@@ -45,6 +47,8 @@ class Frame:
         assert self.dynamic.depth.shape[:2] == (self.H, self.W), "Dynamic depth shape mismatch"
         assert self.dynamic.confs.shape[:2] == (self.H, self.W), "Dynamic confs shape mismatch"
         assert self.dynamic.dmask.shape[:2] == (self.H, self.W), "Dynamic mask shape mismatch"
+
+        assert self.flow.shape[:2] == (self.H, self.W), "Flow shape mismatch"
 
     def get_static_points(self, stride: int=1):
         return self._to_points(image=self.static.image,

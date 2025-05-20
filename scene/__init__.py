@@ -64,5 +64,5 @@ class Scene:
     def getCameras(self, scale=1.0):
         return self.cameras[scale]
 
-    def getCam(self, idx scale=1.0):
+    def getCam(self, idx, scale=1.0):
         return self.getCameras(scale=scale)[idx]

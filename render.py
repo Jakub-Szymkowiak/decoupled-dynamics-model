@@ -37,7 +37,7 @@ def render_scene(model, views, iteration, model_cfg, pipe_cfg, background, mode)
             view.load2device()
 
         fid = torch.as_tensor(view.fid, device="cuda")
-        deltas = model.infer_deltas(fid, noise=False)
+        deltas, _ = model.infer_deltas(fid, noise=False)
 
         results = run_renderer(mode, deltas, view)
         rendering = results["render"]
@@ -63,7 +63,7 @@ def render_scene(model, views, iteration, model_cfg, pipe_cfg, background, mode)
         torch.cuda.synchronize()
         t_start = time.time()
         
-        deltas = model.infer_deltas(fid, noise=False)
+        deltas, _ = model.infer_deltas(fid, noise=False)
         
         results = run_renderer("composed", deltas, view)
 

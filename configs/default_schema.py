@@ -17,7 +17,9 @@ DEFAULT_SCHEMA = {
     },
     "extra": {
         "dirname": "extra",
-        "subdirs": {}
+        "subdirs": {
+            "flow": "optical_flow"
+        }
     },
     "cameras": {
         "dirname": "cameras",

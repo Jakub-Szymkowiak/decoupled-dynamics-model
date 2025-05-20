@@ -124,3 +124,72 @@ def render(viewpoint_camera, pc: GaussianModel, pipe, bg_color: torch.Tensor, d_
             "visibility_filter": radii > 0,
             "radii": radii,
             "depth": depth}
+
+
+def render_decoupled(model, viewpoint, pipe, bg_color, deltas, override_xyz=None, scaling_modifier=1.0):
+    xyz = model.get_xyz
+    screenspace_points = torch.zeros_like(xyz, dtype=xyz.dtype, requires_grad=True, device="cuda") + 0
+    screenspace_points_densify = torch.zeros_like(xyz, dtype=xyz.dtype, requires_grad=True, device="cuda") + 0
+    try:
+        screenspace_points.retain_grad()
+        screenspace_points_densify.retain_grad()
+    except:
+        pass
+
+    tanfovx = math.tan(viewpoint.FoVx * 0.5)
+    tanfovy = math.tan(viewpoint.FoVy * 0.5)
+
+    raster_settings = GaussianRasterizationSettings(image_height=int(viewpoint.image_height),
+                                                    image_width=int(viewpoint.image_width),
+                                                    tanfovx=tanfovx,
+                                                    tanfovy=tanfovy,
+                                                    bg=bg_color,
+                                                    scale_modifier=scaling_modifier,
+                                                    viewmatrix=viewpoint.world_view_transform,
+                                                    projmatrix=viewpoint.full_proj_transform,
+                                                    sh_degree=model.active_sh_degree,
+                                                    campos=viewpoint.camera_center,
+                                                    prefiltered=False,
+                                                    debug=pipe.debug)
+
+    rasterizer = GaussianRasterizer(raster_settings=raster_settings)
+
+    means3D = xyz + deltas.d_xyz
+    opacity = model.get_opacity
+
+    scales = None
+    rotations = None
+    cov3D_precomp = None
+    if pipe.compute_cov3D_python:
+        cov3D_precomp = model.get_covariance(scaling_modifier)
+    else:
+        scales = model.get_scaling + deltas.d_scaling
+        rotations = model.get_rotation + deltas.d_rotation
+
+    shs = None
+    colors_precomp = None
+    if pipe.convert_SHs_python:
+        shs_view = model.get_features.transpose(1, 2).view(-1, 3, (model.max_sh_degree + 1) ** 2)
+        dir_pp = (xyz - viewpoint.camera_center.repeat(model.get_features.shape[0], 1))
+        dir_pp_normalized = dir_pp / dir_pp.norm(dim=1, keepdim=True)
+        sh2rgb = eval_sh(model.active_sh_degree, shs_view, dir_pp_normalized)
+        colors_precomp = torch.clamp_min(sh2rgb + 0.5, 0.0)
+    else:
+        shs = model.get_features
+
+    rendered_image, radii, depth = rasterizer(means3D=means3D,
+                                              means2D=screenspace_points,
+                                              means2D_densify=screenspace_points_densify,
+                                              shs=shs,
+                                              colors_precomp=colors_precomp,
+                                              opacities=opacity,
+                                              scales=scales,
+                                              rotations=rotations,
+                                              cov3D_precomp=cov3D_precomp)
+
+    return {"render": rendered_image,
+            "viewspace_points": screenspace_points,
+            "viewspace_points_densify": screenspace_points_densify,
+            "visibility_filter": radii > 0,
+            "radii": radii,
+            "depth": depth}

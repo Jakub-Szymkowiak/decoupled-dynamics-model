@@ -1,13 +1,16 @@
 import torch
 
-from gaussian_renderer import render
+from gaussian_renderer import render_decoupled
 
 
-def get_rendering_func(model, pipe, background, is_6dof):
-    def run_renderer(mode, deltas, viewpoint):
-        return render(viewpoint, model.get_models()[mode], pipe, background, 
-                      deltas[mode].d_xyz, deltas[mode].d_rotation, deltas[mode].d_scaling, 
-                      is_6dof)
+def get_rendering_func(model, pipe, bg_color, is_6dof=False):
+    def run_renderer(mode, deltas, viewpoint, override_xyz=None):
+        return render_decoupled(model=model.get_models()[mode], 
+                                viewpoint=viewpoint, 
+                                pipe=pipe, 
+                                bg_color=bg_color, 
+                                deltas=deltas[mode], 
+                                override_xyz=override_xyz)
 
     return run_renderer
 

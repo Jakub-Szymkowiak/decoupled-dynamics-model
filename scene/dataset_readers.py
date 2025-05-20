@@ -14,19 +14,20 @@ class CameraInfo(NamedTuple):
     uid: int
     fid: float
 
-    R: np.array
-    T: np.array
+    R: np.ndarray
+    T: np.ndarray
 
-    FovY: np.array
-    FovX: np.array
+    FovY: np.ndarray
+    FovX: np.ndarray
 
-    static_image: np.array
-    static_depth: np.array
+    static_image: np.ndarray
+    static_depth: np.ndarray
 
-    dynamic_image: np.array
-    dynamic_depth: np.array
+    dynamic_image: np.ndarray
+    dynamic_depth: np.ndarray
     
-    dmask: np.array
+    dmask: np.ndarray
+    flow: np.ndarray
 
     width: int
     height: int

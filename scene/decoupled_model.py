@@ -31,7 +31,8 @@ class DecoupledModel:
             iteration: Optional[int] = None,
             time_interval: Optional[float] = None,
             smooth_term: Optional[torch.Tensor] = None,
-            noise: bool=True
+            noise: bool=True,
+            with_grad: bool=False
         ):
 
         if noise:
@@ -45,6 +46,9 @@ class DecoupledModel:
         xyz = self.dynamic.get_xyz.detach().to(torch.float32)
 
         fid_input = fid.view(1, 1).expand(self._Nd, 1)
+        if with_grad:
+            fid_input.requires_grad_(True)
+
         time_input = fid_input + self._ast_noise
 
         raw_deltas = self.deform.step(xyz, time_input)
@@ -53,7 +57,7 @@ class DecoupledModel:
         dynamic_deltas = DeformDeltas(*raw_deltas)
         composed_deltas = DeformDeltas.prepare_composed(self._Ns, dynamic_deltas)
 
-        return {"static": static_deltas, "dynamic": dynamic_deltas, "composed": composed_deltas}
+        return {"static": static_deltas, "dynamic": dynamic_deltas, "composed": composed_deltas}, fid_input
 
     def get_zero_deltas(self) -> DeformDeltas:
         return {mode: DeformDeltas.get_zero_deform() for mode in ("static", "dynamic", "composed")}

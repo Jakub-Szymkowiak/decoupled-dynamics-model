@@ -1,7 +1,7 @@
 import sys
 
 from random import randint
-from types import SimpleNamespace as State
+from types import SimpleNamespace
 from typing import Callable, Dict, List, NamedTuple
 
 import torch
@@ -75,7 +75,8 @@ class SceneOptimizer:
                                                  max_steps=20000)            
 
     def _init_training_state(self):
-        state = State()
+        state = SimpleNamespace()
+        state.iteration = -1
         state.iter_start = torch.cuda.Event(enable_timing=True)
         state.iter_end = torch.cuda.Event(enable_timing=True)
         state.viewpoint_stack = None
@@ -87,11 +88,24 @@ class SceneOptimizer:
 
         return state
 
+    def _init_utils(self):
+        utils = SimpleNamespace()
+        utils.run_renderer = self.run_renderer
+        utils.smooth_term = get_linear_noise_func(lr_init=0.1, 
+                                                  lr_final=1e-15, 
+                                                  lr_delay_mult=0.01, 
+                                                  max_steps=20000) 
+
+        return utils
+
     def start_training(self):
         state = self._init_training_state()
+        utils = self._init_utils()
 
         for iteration in range(1, self.spec.iterations + 1):
             state.iter_start.record()
+
+            state.iteration = iteration
 
             # Every 1k iterations increase SH degree until max
             if iteration % 1000 == 0:
@@ -105,6 +119,13 @@ class SceneOptimizer:
             viewpoint = state.viewpoint_stack[random_index]
             fid = viewpoint.fid
 
+            # Next cam
+            next_index = random_index + 1 
+            if random_index + 1 < self.scene.num_frames:
+                next_viewpoint = state.viewpoint_stack[next_index]
+            else:
+                next_viewpoint = None
+
             if self.spec.load2gpu_on_the_fly:
                 viewpoint.load2device()
 
@@ -114,9 +135,10 @@ class SceneOptimizer:
 
             # Handle deform network
             if directive.train_deform:
-                deltas = self.model.infer_deltas(fid, iteration, state.time_interval, self.smooth_term)
+                deltas, fid_input = self.model.infer_deltas(fid, iteration, state.time_interval, self.smooth_term, with_grad=True)
             else: 
                 deltas = self.model.get_zero_deltas()
+                fid_input = None
 
             # Render images and compute photometric losses
             losses, renders = {}, {}
@@ -131,14 +153,15 @@ class SceneOptimizer:
             loss = sum(losses[_]["total"] for _ in losses)
 
             # Regularize 
-            reg_loss, _ = self.reg_registry.compute(
-                model=self.model,
-                deltas=deltas["dynamic"],
-                render=renders,
-                viewpoint=viewpoint,
-                directive=directive,
-                cokolwiek=2
-            )
+            reg_loss, _ = self.reg_registry.compute(model=self.model,
+                                                    deltas=deltas,
+                                                    render=renders,
+                                                    viewpoint=viewpoint,
+                                                    next_viewpoint=next_viewpoint,
+                                                    fid_input=fid_input,
+                                                    state=state,
+                                                    utils=utils,
+                                                    directive=directive)
 
             # DEBUG
             if False:
@@ -224,7 +247,7 @@ class SceneOptimizer:
 
         return losses, rendering_result, gt_image
 
-    def _update_progress_bar(self, iteration: int, current_loss: float, state: State):
+    def _update_progress_bar(self, iteration: int, current_loss: float, state: SimpleNamespace):
         state.ema_loss = 0.4 * current_loss + 0.6 * state.ema_loss
 
         if iteration % 10 == 0:
@@ -271,7 +294,7 @@ class SceneOptimizer:
                 viewpoint.load2device()
 
             fid = viewpoint.fid
-            deltas = self.model.infer_deltas(fid, iteration, time_interval, noise=False)
+            deltas, _ = self.model.infer_deltas(fid, iteration, time_interval, noise=False)
 
             for mode in gts.keys():
                 _, rendering_result, gt_image = self._render_and_compute_loss(mode, deltas, viewpoint)
