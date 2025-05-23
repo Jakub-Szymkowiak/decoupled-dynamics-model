@@ -37,11 +37,13 @@ def loadCam(args, cam_info, resolution_scale):
     dynamic_depth = torch.from_numpy(cam_info.dynamic_depth.copy())
     
     dmask = torch.from_numpy(cam_info.dmask.copy())
+    flow = torch.from_numpy(cam_info.flow.copy()) if cam_info.flow is not None else None
 
     return Camera(uid=cam_info.uid, fid=cam_info.fid,
                   R=cam_info.R, T=cam_info.T, FoVx=cam_info.FovX, FoVy=cam_info.FovY,
                   static_image=static_image, static_depth=static_depth,
-                  dynamic_image=dynamic_image, dynamic_depth=dynamic_depth, dmask=dmask,
+                  dynamic_image=dynamic_image, dynamic_depth=dynamic_depth,
+                  dmask=dmask, flow=flow,
                   data_device=args.data_device if not args.load2gpu_on_the_fly else "cpu",
                   pose=cam_info.pose, intrinsics=cam_info.intrinsics)
 

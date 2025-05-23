@@ -39,10 +39,8 @@ def load_scene_data(root, schema=DEFAULT_SCHEMA):
         intrinsics = Intrinsics(K_vec)
         pose = Pose(pose_vec)
 
-        optical_flow_path = paths["extra"]["flow"] / f"flow_{idx:04d}.png"
-        optical_flow_image = iio.imread(optical_flow_path)
-        optical_flow_data = np.asarray(optical_flow_image)
-        flow = optical_flow_data[(optical_flow_data.shape[0] // 2):, :, :,] 
+        optical_flow_path = paths["extra"]["flow"] / f"flow_{idx:04d}.npy"
+        flow = np.load(optical_flow_path) if optical_flow_path.exists() else None
 
         frame = Frame(frame_id=idx, 
                       static_data=static_data, 

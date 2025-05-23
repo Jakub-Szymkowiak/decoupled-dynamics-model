@@ -1,6 +1,7 @@
 import torch
 
 from trainer.losses.depth_alignment import dynamic_depth_alignment_penalty, static_depth_alignment_penalty
+from trainer.losses.optical_flow import optical_flow_consistency_loss
 from trainer.losses.reprojection import reprojection_loss
 from trainer.regularizers import Regularizer
 
@@ -18,8 +19,9 @@ def d_scaling_anisotropy_penalty(deltas, directive):
 
 DEFAULT_REGULARIZERS = [
     Regularizer(scaling_anisotropy_penalty, weight=0.25),
-    Regularizer(d_scaling_anisotropy_penalty, weight=0.25),
+    Regularizer(d_scaling_anisotropy_penalty, weight=1.0),
     #Regularizer(dynamic_depth_alignment_penalty, weight=0.001),
     #Regularizer(static_depth_alignment_penalty, weight=0.001)
-    Regularizer(reprojection_loss, weight=0.01)
+    Regularizer(reprojection_loss, weight=0.5),
+    Regularizer(optical_flow_consistency_loss, weight=0.5)
 ]

@@ -35,13 +35,16 @@ class DecoupledModel:
             with_grad: bool=False
         ):
 
+        self._update_num_gaussians()
+
         if noise:
-            assert_msg = "Must provide parameters for noise = True; or use noise = False"
-            assert iteration is not None and time_interval is not None and smooth_term is not None, assert_msg
-            self._ast_noise.normal_()
+            if iteration is None or time_interval is None or smooth_term is None:
+                raise ValueError("Must provide iteration, time_interval, and smooth_term when noise=True")
+            self._ast_noise = torch.randn(self._Nd, 1, device="cuda") 
             self._ast_noise *= time_interval * smooth_term(iteration)
         else:
-            self._ast_noise.zero_()
+            self._ast_noise = torch.zeros(self._Nd, 1, device="cuda")
+
 
         xyz = self.dynamic.get_xyz.detach().to(torch.float32)
 
@@ -97,12 +100,13 @@ class DecoupledModel:
         self.static.create_from_pcd(static_ptc, cameras_extent)
         self.dynamic.create_from_pcd(dynamic_ptc, cameras_extent)
         
-        self._Ns, self._Nd = self.static.get_xyz.size(0), self.dynamic.get_xyz.size(0)
+        self._update_num_gaussians()
 
         print("Number of static background Gaussians at init: ", self._Ns)
         print("Number of dynamic foreground Gaussians at init: ", self._Nd)
 
-        self._ast_noise = torch.zeros(self._Nd, 1, device="cuda")
+    def _update_num_gaussians(self):
+        self._Ns, self._Nd = self.static.get_xyz.size(0), self.dynamic.get_xyz.size(0)
 
     def training_setup(self, training_args):
         self.deform.train_setting(training_args)
@@ -122,7 +126,6 @@ class DecoupledModel:
         self.dynamic.load_ply(directory / "dynamic.ply")
 
         self._Ns, self._Nd = self.static.get_xyz.size(0), self.dynamic.get_xyz.size(0)
-        self._ast_noise = torch.zeros(self._Nd, 1, device="cuda")
 
     def save(self, iteration, model_path: Path):
         directory = Path(model_path) / "point_cloud" / f"_{iteration}" 

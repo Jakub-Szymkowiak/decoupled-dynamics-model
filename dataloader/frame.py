@@ -40,6 +40,11 @@ class Frame:
 
         self.H, self.W = self.static.image.shape[:2]
 
+        # DEBUGGING: set True if using ground-truth resized DAVIS masks
+        use_gt_davis_masks = False 
+        if use_gt_davis_masks: 
+            self.dynamic.dmask = self.dynamic.dmask.mean(axis=2).astype(self.dynamic.dmask.dtype)
+
         assert self.static.image.shape[:2] == (self.H, self.W), "Static image shape mismatch"
         assert self.static.depth.shape[:2] == (self.H, self.W), "Static depth shape mismatch"
         
@@ -48,7 +53,8 @@ class Frame:
         assert self.dynamic.confs.shape[:2] == (self.H, self.W), "Dynamic confs shape mismatch"
         assert self.dynamic.dmask.shape[:2] == (self.H, self.W), "Dynamic mask shape mismatch"
 
-        assert self.flow.shape[:2] == (self.H, self.W), "Flow shape mismatch"
+        if self.flow is not None:
+            assert self.flow.shape[:2] == (self.H, self.W), "Flow shape mismatch"
 
     def get_static_points(self, stride: int=1):
         return self._to_points(image=self.static.image,

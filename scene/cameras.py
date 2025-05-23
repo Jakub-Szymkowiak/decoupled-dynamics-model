@@ -19,7 +19,8 @@ class Camera(nn.Module):
     def __init__(self, uid, fid,
                  R, T, FoVx, FoVy, 
                  static_image, static_depth,
-                 dynamic_image, dynamic_depth, dmask,
+                 dynamic_image, dynamic_depth, 
+                 dmask, flow,
                  pose, intrinsics,
                  trans=np.array([0.0, 0.0, 0.0]), 
                  scale=1.0, data_device="cuda"):
@@ -53,6 +54,8 @@ class Camera(nn.Module):
         self.dynamic_depth = dynamic_depth.to(self.data_device)
 
         self.dmask = dmask.unsqueeze(0).to(self.data_device)
+
+        self.flow = flow.to(self.data_device) if flow is not None else None
 
         self.zfar = 100.0
         self.znear = 0.01

@@ -58,7 +58,7 @@ def read_and_process(root: str):
     processor.downsample_static_pointcloud(N=100_000)
 
     print("5. Upsamping dynamic pointcloud.")
-    processor.upsample_dynamic_pointcloud(factor=5.0)
+    processor.upsample_dynamic_pointcloud(factor=1.0)
 
     print("6. Normalizing scene setup.")
     processor.normalize()    
@@ -97,6 +97,7 @@ def read_cam_info_from_scene(processor: SceneProcessor, frame_id: int):
                           dynamic_image=frame.dynamic.image,
                           dynamic_depth=frame.dynamic.depth,
                           dmask=frame.dynamic.dmask,
+                          flow=frame.flow,
                           width=width, height=height,
                           pose=pose, intrinsics=intrinsics)
 

@@ -123,7 +123,7 @@ class SceneProcessor:
         self._dynamic_pointcloud = PointCloud(xyz=xyz, rgb=rgb)
         self._dynamic_pointcloud.estimate_normals()
 
-    def normalize(self, radius: float=0.5):
+    def normalize(self, radius: float=0.1):
         base = np.array([f.pose.T for f in self._frames])
         center = base.mean(axis=0)
 

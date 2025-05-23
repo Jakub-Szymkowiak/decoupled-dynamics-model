@@ -38,17 +38,29 @@ class OptimizationSpec(NamedTuple):
     test_iterations: List[int]
     save_iterations: List[int]
     
+    densify_until_iter: int
+    densify_from_iter: int
+    densification_interval: int
+    densify_grad_threshold: float
+    
+    opacity_reset_interval: int
+    
     @classmethod
     def from_params(cls, model_cfg, opt_cfg, pipe_cfg, args):
-        return cls(iterations          = opt_cfg.iterations,
-                   lambda_dssim        = opt_cfg.lambda_dssim,
-                   load2gpu_on_the_fly = model_cfg.load2gpu_on_the_fly,
-                   white_background    = model_cfg.white_background,
-                   test_iterations     = args.test_iterations,
-                   save_iterations     = args.save_iterations,
-                   lambdas_decoupled = {"static": opt_cfg.lambda_static,
-                                        "dynamic": opt_cfg.lambda_dynamic,
-                                        "composed": opt_cfg.lambda_composed})
+        return cls(iterations             = opt_cfg.iterations,
+                   lambda_dssim           = opt_cfg.lambda_dssim,
+                   densify_until_iter     = opt_cfg.densify_until_iter,
+                   densify_from_iter      = opt_cfg.densify_from_iter,
+                   densification_interval = opt_cfg.densification_interval,
+                   opacity_reset_interval = opt_cfg.opacity_reset_interval,
+                   densify_grad_threshold = opt_cfg.densify_grad_threshold,
+                   load2gpu_on_the_fly    = model_cfg.load2gpu_on_the_fly,
+                   white_background       = model_cfg.white_background,
+                   test_iterations        = args.test_iterations,
+                   save_iterations        = args.save_iterations,
+                   lambdas_decoupled      = {"static": opt_cfg.lambda_static,
+                                             "dynamic": opt_cfg.lambda_dynamic,
+                                             "composed": opt_cfg.lambda_composed})
 
 
 class SceneOptimizer:
@@ -147,8 +159,8 @@ class SceneOptimizer:
                 losses["static"], renders["static"], _ = self._render_and_compute_loss("static", deltas, viewpoint)
             if directive.train_dynamic:
                 losses["dynamic"], renders["dynamic"], _ = self._render_and_compute_loss("dynamic", deltas, viewpoint)
-            if directive.train_static and directive.train_dynamic:
-                losses["composed"], renders["composed"], _ = self._render_and_compute_loss("composed", deltas, viewpoint)
+            # if directive.train_static and directive.train_dynamic:
+            #     losses["composed"], renders["composed"], _ = self._render_and_compute_loss("composed", deltas, viewpoint)
 
             loss = sum(losses[_]["total"] for _ in losses)
 
@@ -219,11 +231,36 @@ class SceneOptimizer:
                             state.best_psnr[mode] = psnr_score.item()
                             state.best_iter[mode] = iteration
                     torch.cuda.empty_cache()
+                    print(f"Static/dynamic counts: {self.model.static.get_xyz.shape[0]} / {self.model.dynamic.get_xyz.shape[0]}")
 
                 # Saving
                 if iteration in self.spec.save_iterations:
                     print(f"\n[ITER {iteration}] Saving Gaussians")
                     self.scene.save(iteration)
+
+                # Densification
+                if iteration < self.spec.densify_until_iter:
+                    if directive.train_static:
+                        viewspace_point_tensor_densify = renders["static"]["viewspace_points_densify"]
+                        visibility_filter = renders["static"]["visibility_filter"]
+                        self.model.static.add_densification_stats(viewspace_point_tensor_densify, visibility_filter)
+                    if directive.train_dynamic:
+                        viewspace_point_tensor_densify = renders["dynamic"]["viewspace_points_densify"]
+                        visibility_filter = renders["dynamic"]["visibility_filter"]
+                        self.model.dynamic.add_densification_stats(viewspace_point_tensor_densify, visibility_filter)
+
+                    if iteration > self.spec.densify_from_iter and iteration % self.spec.densification_interval == 0:
+                        size_threshold = 20 if iteration > self.spec.opacity_reset_interval else None
+                        if directive.train_static:
+                            self.model.static.densify_and_prune(self.spec.densify_grad_threshold, 0.005, self.scene.cameras_extent, size_threshold)
+                        if directive.train_dynamic:
+                            self.model.dynamic.densify_and_prune(self.spec.densify_grad_threshold, 0.005, self.scene.cameras_extent, size_threshold)
+
+                    if iteration % self.spec.opacity_reset_interval == 0 or (self.spec.white_background and iteration == opt.densify_from_iter):
+                        if directive.train_static:
+                            self.model.static.reset_opacity()
+                        if directive.train_dynamic:
+                            self.model.dynamic.reset_opacity()
 
             
 
@@ -236,6 +273,10 @@ class SceneOptimizer:
         if mode == "dynamic":
             #rendered_image = mask_image(rendered_image, viewpoint.dmask)
             gt_image = mask_image(gt_image, viewpoint.dmask)
+            
+            #from torchvision.utils import save_image
+            #save_image(gt_image.detach().cpu(), "dynagt.png")
+            #save_image(viewpoint.dynamic_mask.detach().cpu(), "dynagt.png")
 
         l1_val = l1_loss(rendered_image, gt_image)
         ssim_val = ssim(rendered_image, gt_image)

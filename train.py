@@ -47,7 +47,7 @@ def parse_args():
     parser.add_argument("--detect_anomaly", action="store_true", default=False)
     parser.add_argument("--quiet", action="store_true")
 
-    test_interval = 2500
+    test_interval = 200
     max_iters = 100_000
     default_test_iterations = list(range(test_interval, max_iters, test_interval))
     default_save_iterations = [1, 5000, 10000, 15000, 30000]

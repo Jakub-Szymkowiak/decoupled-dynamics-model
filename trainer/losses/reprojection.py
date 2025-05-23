@@ -4,8 +4,11 @@ from utils.delta_utils import DeformDeltas
 from utils.loss_utils import l1_loss
 
 
-def reprojection_loss(model, deltas, next_viewpoint, fid_input, state, utils):
+def reprojection_loss(model, deltas, next_viewpoint, fid_input, state, directive, utils):
     if next_viewpoint is None or fid_input is None:
+        return 0.0
+
+    if not directive.train_dynamic or not directive.train_deform:
         return 0.0
     
     d_xyz = deltas["dynamic"].d_xyz
